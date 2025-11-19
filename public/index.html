@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Energy Trading Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            background: rgba(15, 32, 39, 0.95);
+            padding: 0.75rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            border-bottom: 2px solid #00d4ff;
+            box-shadow: 0 2px 10px rgba(0, 212, 255, 0.3);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 400;
+            letter-spacing: 1px;
+        }
+
+        .header h1 i {
+            color: #00d4ff;
+            margin-right: 10px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #ffa500 0%, #ff8c00 100%);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff4757 0%, #d63031 100%);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.5);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-bar {
+            background: rgba(15, 32, 39, 0.8);
+            padding: 0.4rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #f44336;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.streaming {
+            background: #00d4ff;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .dashboard {
+            padding: 1rem;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-gap: 1rem;
+            height: calc(100vh - 180px);
+            overflow: hidden;
+        }
+
+        .card {
+            background: rgba(32, 58, 67, 0.8);
+            border-radius: 8px;
+            padding: 1rem;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .card h3 {
+            margin-bottom: 0.75rem;
+            font-weight: 400;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #00d4ff;
+            flex-shrink: 0;
+        }
+
+        .chart-container {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .card.news-feed, .card.trader-qa {
+            overflow: hidden;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+
+        .metric-card {
+            background: rgba(0, 212, 255, 0.1);
+            padding: 0.75rem;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid rgba(0, 212, 255, 0.3);
+        }
+
+        .metric-value {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-bottom: 0.3rem;
+            color: #00d4ff;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+
+        .country-selector {
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid rgba(0, 212, 255, 0.4);
+            color: #e0e0e0;
+            padding: 0.4rem;
+            border-radius: 4px;
+            margin-bottom: 0.75rem;
+            font-size: 0.85rem;
+        }
+
+        .dataset-selector {
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid rgba(0, 212, 255, 0.4);
+            color: #e0e0e0;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .dataset-selector option {
+            background: #203a43;
+            color: white;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(0, 212, 255, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #00ffcc);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .news-feed ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .news-feed ul::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .news-feed ul::-webkit-scrollbar-track {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .news-feed ul::-webkit-scrollbar-thumb {
+            background: rgba(0, 212, 255, 0.5);
+            border-radius: 3px;
+        }
+
+        .news-feed li {
+            padding: 0.5rem;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+            font-size: 0.85rem;
+            color: #e0e0e0;
+        }
+        
+        .news-feed li:last-child {
+            border-bottom: none;
+        }
+
+        .trader-qa #qaSection {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .trader-qa #qaSection::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .trader-qa #qaSection::-webkit-scrollbar-track {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .trader-qa #qaSection::-webkit-scrollbar-thumb {
+            background: rgba(0, 212, 255, 0.5);
+            border-radius: 3px;
+        }
+
+        .trader-qa .question {
+            font-style: italic;
+            opacity: 0.8;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .trader-qa .answer {
+            font-weight: bold;
+            color: #00ffcc;
+            font-size: 0.9rem;
+        }
+
+        .compact-card {
+            grid-row: span 1;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: 1rem;
+                padding: 1rem;
+            }
+            
+            .controls {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-bolt"></i>Energy Trading Dashboard</h1>
+        <div class="controls">
+            <select class="dataset-selector" id="datasetSelector">
+                <option value="time_series_15min_singleindex.csv">15 Min Intervals</option>
+                <option value="time_series_30min_singleindex.csv" selected>30 Min Intervals</option>
+                <option value="time_series_60min_singleindex.csv">60 Min Intervals</option>
+            </select>
+            <button class="btn btn-primary" id="startBtn">
+                <i class="fas fa-play"></i> Start Stream
+            </button>
+            <button class="btn btn-secondary" id="resetBtn">
+                <i class="fas fa-refresh"></i> Reset
+            </button>
+            <button class="btn btn-danger" id="stopBtn" disabled>
+                <i class="fas fa-stop"></i> Stop Stream
+            </button>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-item">
+            <div class="status-indicator" id="statusIndicator"></div>
+            <span id="streamStatus">Disconnected</span>
+        </div>
+        <div class="status-item">
+            <i class="fas fa-database"></i>
+            <span id="dataProgress">0 / 0 records (0%)</span>
+        </div>
+        <div class="status-item">
+            <i class="fas fa-clock"></i>
+            <span id="currentTime">--:--:--</span>
+        </div>
+    </div>
+
+    <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+    </div>
+
+    <div class="dashboard">
+        <div class="card">
+            <h3><i class="fas fa-chart-line"></i>Load vs Forecast</h3>
+            <select class="country-selector" id="loadCountrySelector">
+                <option value="PL">Poland (PL)</option>
+                <option value="HU">Hungary (HU)</option>
+                <option value="FI">Finland (FI)</option>
+            </select>
+            <div class="chart-container">
+                <canvas id="loadChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3><i class="fas fa-euro-sign"></i>Day-Ahead Prices</h3>
+            <select class="country-selector" id="priceCountrySelector">
+                <option value="PL">Poland (PL)</option>
+                <option value="HU">Hungary (HU)</option>
+                <option value="FI">Finland (FI)</option>
+            </select>
+            <div class="chart-container">
+                <canvas id="priceChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3><i class="fas fa-wind"></i>Renewable Generation</h3>
+            <select class="country-selector" id="renewableCountrySelector">
+                <option value="PL">Poland (PL)</option>
+                <option value="HU">Hungary (HU)</option>
+                <option value="FI">Finland (FI)</option>
+            </select>
+            <div class="chart-container">
+                <canvas id="renewableChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card compact-card">
+            <h3><i class="fas fa-tachometer-alt"></i>Real-time Metrics</h3>
+            <div class="metrics-grid" id="metricsGrid">
+                <div class="metric-card">
+                    <div class="metric-value" id="totalLoad">--</div>
+                    <div class="metric-label">Total Load (MW)</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="avgPrice">--</div>
+                    <div class="metric-label">Avg Price (€/MWh)</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="renewableShare">--</div>
+                    <div class="metric-label">Renewable %</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="forecastAccuracy">--</div>
+                    <div class="metric-label">Forecast Accuracy %</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card compact-card news-feed">
+            <h3><i class="fas fa-newspaper"></i> Market News</h3>
+            <ul id="newsList">
+                <li>Welcome to the Energy Trading Dashboard!</li>
+            </ul>
+        </div>
+
+        <div class="card compact-card trader-qa">
+            <h3><i class="fas fa-lightbulb"></i> Trader Insights</h3>
+            <div id="qaSection">
+                <p class="question">What's the current market sentiment?</p>
+                <p class="answer">Awaiting new data to determine market direction. Stand by for updates.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Socket.IO connection
+        const socket = io();
+        
+        // Chart configurations
+        const chartConfig = {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: 'white'
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                hour: 'HH:mm',
+                                minute: 'HH:mm'
+                            }
+                        },
+                        ticks: {
+                            color: 'white'
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        }
+                    },
+                    y: {
+                        ticks: {
+                            color: 'white'
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        }
+                    }
+                },
+                elements: {
+                    point: {
+                        radius: 3
+                    }
+                }
+            }
+        };
+
+        // Initialize charts
+        const loadChart = new Chart(document.getElementById('loadChart'), {
+            ...chartConfig,
+            data: {
+                datasets: [
+                    {
+                        label: 'Actual Load',
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        data: []
+                    },
+                    {
+                        label: 'Forecast Load',
+                        borderColor: '#00ffcc',
+                        backgroundColor: 'rgba(0, 255, 204, 0.1)',
+                        borderDash: [5, 5],
+                        data: []
+                    }
+                ]
+            }
+        });
+
+        const priceChart = new Chart(document.getElementById('priceChart'), {
+            ...chartConfig,
+            data: {
+                datasets: [{
+                    label: 'Day-Ahead Price',
+                    borderColor: '#ff6b6b',
+                    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                    data: []
+                }]
+            }
+        });
+
+        const renewableChart = new Chart(document.getElementById('renewableChart'), {
+            ...chartConfig,
+            data: {
+                datasets: [
+                    {
+                        label: 'Solar Generation',
+                        borderColor: '#ffd93d',
+                        backgroundColor: 'rgba(255, 217, 61, 0.1)',
+                        data: []
+                    },
+                    {
+                        label: 'Wind Generation',
+                        borderColor: '#6bcf7f',
+                        backgroundColor: 'rgba(107, 207, 127, 0.1)',
+                        data: []
+                    }
+                ]
+            }
+        });
+
+        // Data storage
+        let currentData = null;
+        let dataHistory = [];
+        const maxDataPoints = 50;
+
+        // UI Elements
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const datasetSelector = document.getElementById('datasetSelector');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const streamStatus = document.getElementById('streamStatus');
+        const dataProgress = document.getElementById('dataProgress');
+        const currentTime = document.getElementById('currentTime');
+        const progressFill = document.getElementById('progressFill');
+        const newsList = document.getElementById('newsList');
+        const qaSection = document.getElementById('qaSection');
+
+        // Country selectors
+        const loadCountrySelector = document.getElementById('loadCountrySelector');
+        const priceCountrySelector = document.getElementById('priceCountrySelector');
+        const renewableCountrySelector = document.getElementById('renewableCountrySelector');
+
+        // Button event listeners
+        startBtn.addEventListener('click', () => {
+            socket.emit('startStream', { interval: 2000 });
+        });
+
+        stopBtn.addEventListener('click', () => {
+            socket.emit('stopStream');
+        });
+
+        resetBtn.addEventListener('click', () => {
+            socket.emit('resetStream');
+            dataHistory = [];
+            updateCharts();
+        });
+
+        datasetSelector.addEventListener('change', (e) => {
+            socket.emit('changeDataset', { dataset: e.target.value });
+        });
+
+        // Country selector listeners
+        loadCountrySelector.addEventListener('change', updateCharts);
+        priceCountrySelector.addEventListener('change', updateCharts);
+        renewableCountrySelector.addEventListener('change', updateCharts);
+
+        // Socket event listeners
+        socket.on('connect', () => {
+            streamStatus.textContent = 'Connected';
+            statusIndicator.classList.add('streaming');
+        });
+
+        socket.on('disconnect', () => {
+            streamStatus.textContent = 'Disconnected';
+            statusIndicator.classList.remove('streaming');
+        });
+
+        socket.on('energyData', (data) => {
+            currentData = data;
+            dataHistory.push(data);
+            
+            // Keep only recent data points
+            if (dataHistory.length > maxDataPoints) {
+                dataHistory.shift();
+            }
+            
+            updateUI(data);
+            updateCharts();
+            updateMetrics();
+        });
+
+        socket.on('streamStatus', (data) => {
+            if (data.isStreaming) {
+                streamStatus.textContent = 'Streaming';
+                statusIndicator.classList.add('streaming');
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            } else {
+                streamStatus.textContent = 'Stopped';
+                statusIndicator.classList.remove('streaming');
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        });
+
+        socket.on('status', (data) => {
+            dataProgress.textContent = `${data.currentIndex} / ${data.totalRecords} records`;
+            const progress = data.totalRecords > 0 ? (data.currentIndex / data.totalRecords) * 100 : 0;
+            progressFill.style.width = progress + '%';
+        });
+
+        socket.on('datasetChanged', (data) => {
+            console.log('Dataset changed to:', data.dataset);
+            dataHistory = [];
+            updateCharts();
+        });
+
+        socket.on('marketNews', (news) => {
+            const li = document.createElement('li');
+            const link = document.createElement('a');
+            link.href = news.link || '#';
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = news.headline;
+            link.style.color = '#00d4ff';
+            link.style.textDecoration = 'none';
+            link.style.transition = 'color 0.3s';
+            link.onmouseover = function() { this.style.color = '#00ffff'; };
+            link.onmouseout = function() { this.style.color = '#00d4ff'; };
+            
+            li.appendChild(link);
+            newsList.prepend(li);
+            
+            // Keep only 30 items (FIFO - remove oldest when exceeding limit)
+            if (newsList.children.length > 30) {
+                newsList.removeChild(newsList.lastChild);
+            }
+        });
+
+        socket.on('traderInsight', (insight) => {
+            qaSection.innerHTML = `
+                <p class="question">${insight.question}</p>
+                <p class="answer">${insight.answer}</p>
+            `;
+        });
+
+        // Update UI functions
+        function updateUI(data) {
+            dataProgress.textContent = `${data.index} / ${data.total} records (${data.progress}%)`;
+            progressFill.style.width = data.progress + '%';
+            
+            if (data.cetTimestamp) {
+                const date = new Date(data.cetTimestamp);
+                currentTime.textContent = date.toLocaleString();
+            }
+        }
+
+        function updateCharts() {
+            if (dataHistory.length === 0) return;
+
+            const selectedLoadCountry = loadCountrySelector.value;
+            const selectedPriceCountry = priceCountrySelector.value;
+            const selectedRenewableCountry = renewableCountrySelector.value;
+
+            // Update load chart
+            loadChart.data.datasets[0].data = dataHistory.map(d => ({
+                x: new Date(d.timestamp),
+                y: d.countries[selectedLoadCountry]?.load_actual
+            })).filter(point => point.y !== null);
+
+            loadChart.data.datasets[1].data = dataHistory.map(d => ({
+                x: new Date(d.timestamp),
+                y: d.countries[selectedLoadCountry]?.load_forecast
+            })).filter(point => point.y !== null);
+
+            // Update price chart
+            priceChart.data.datasets[0].data = dataHistory.map(d => ({
+                x: new Date(d.timestamp),
+                y: d.countries[selectedPriceCountry]?.price_day_ahead
+            })).filter(point => point.y !== null);
+
+            // Update renewable chart
+            renewableChart.data.datasets[0].data = dataHistory.map(d => ({
+                x: new Date(d.timestamp),
+                y: d.countries[selectedRenewableCountry]?.solar_generation
+            })).filter(point => point.y !== null);
+
+            renewableChart.data.datasets[1].data = dataHistory.map(d => ({
+                x: new Date(d.timestamp),
+                y: d.countries[selectedRenewableCountry]?.wind_generation
+            })).filter(point => point.y !== null);
+
+            // Update all charts
+            loadChart.update('none');
+            priceChart.update('none');
+            renewableChart.update('none');
+        }
+
+        function updateMetrics() {
+            if (!currentData) return;
+
+            // Calculate total load across all countries
+            let totalLoad = 0;
+            let totalPrice = 0;
+            let totalRenewable = 0;
+            let totalGeneration = 0;
+            let priceCount = 0;
+            let accuracySum = 0;
+            let accuracyCount = 0;
+
+            Object.values(currentData.countries).forEach(country => {
+                if (country.load_actual) {
+                    totalLoad += country.load_actual;
+                }
+                if (country.price_day_ahead) {
+                    totalPrice += country.price_day_ahead;
+                    priceCount++;
+                }
+                if (country.solar_generation) {
+                    totalRenewable += country.solar_generation;
+                    totalGeneration += country.solar_generation;
+                }
+                if (country.wind_generation) {
+                    totalRenewable += country.wind_generation;
+                    totalGeneration += country.wind_generation;
+                }
+                
+                // Calculate forecast accuracy
+                if (country.load_actual && country.load_forecast) {
+                    const accuracy = 100 - Math.abs((country.load_actual - country.load_forecast) / country.load_actual * 100);
+                    accuracySum += Math.max(0, accuracy);
+                    accuracyCount++;
+                }
+            });
+
+            // Update metric displays
+            document.getElementById('totalLoad').textContent = 
+                totalLoad > 0 ? Math.round(totalLoad).toLocaleString() : '--';
+            
+            document.getElementById('avgPrice').textContent = 
+                priceCount > 0 ? (totalPrice / priceCount).toFixed(2) : '--';
+            
+            const renewablePercentage = totalLoad > 0 ? (totalRenewable / totalLoad * 100) : 0;
+            document.getElementById('renewableShare').textContent = 
+                renewablePercentage > 0 ? renewablePercentage.toFixed(1) + '%' : '--';
+            
+            document.getElementById('forecastAccuracy').textContent = 
+                accuracyCount > 0 ? (accuracySum / accuracyCount).toFixed(1) + '%' : '--';
+        }
+
+        // Initialize
+        setInterval(() => {
+            if (!socket.connected) {
+                streamStatus.textContent = 'Reconnecting...';
+                statusIndicator.classList.remove('streaming');
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
