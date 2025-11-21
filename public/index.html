@@ -551,16 +551,16 @@
             </div>
         </div>
 
-        <div class="card compact-card">
+        <div class="card compact-card clickable" data-gadget="metrics">
             <h3><i class="fas fa-tachometer-alt"></i>Real-time Metrics</h3>
             <div class="metrics-grid" id="metricsGrid">
                 <div class="metric-card">
                     <div class="metric-value" id="totalLoad">--</div>
-                    <div class="metric-label">Total Load (MW)</div>
+                    <div class="metric-label">Load (MW)</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value" id="avgPrice">--</div>
-                    <div class="metric-label">Avg Price (€/MWh)</div>
+                    <div class="metric-label">Price (€/MWh)</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value" id="renewableShare">--</div>
@@ -568,19 +568,19 @@
                 </div>
                 <div class="metric-card">
                     <div class="metric-value" id="forecastAccuracy">--</div>
-                    <div class="metric-label">Forecast Accuracy %</div>
+                    <div class="metric-label">Forecast Accuracy</div>
                 </div>
             </div>
         </div>
 
-        <div class="card compact-card news-feed">
+        <div class="card compact-card news-feed clickable" data-gadget="news">
             <h3><i class="fas fa-newspaper"></i> Market News</h3>
             <ul id="newsList">
                 <li>Welcome to the Energy Trading Dashboard!</li>
             </ul>
         </div>
 
-        <div class="card compact-card trader-qa">
+        <div class="card compact-card trader-qa clickable" data-gadget="ai">
             <h3><i class="fas fa-lightbulb"></i> AI Trading Advisor</h3>
             
             <!-- Question Input with Datalist for suggestions -->
@@ -645,6 +645,21 @@
             </div>
             <div class="modal-chart-container">
                 <canvas id="modalChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for expanded gadget view -->
+    <div id="gadgetModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="gadgetModalTitle"><i class="fas fa-expand"></i> Gadget Details</h2>
+                <button class="modal-close" onclick="closeGadgetModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="gadgetModalContent" style="height: calc(100% - 100px); overflow-y: auto; padding: 1rem;">
+                <!-- Content will be dynamically inserted here -->
             </div>
         </div>
     </div>
@@ -803,7 +818,10 @@
         }
 
         // Global selector listeners
-        globalCountrySelector.addEventListener('change', updateCharts);
+        globalCountrySelector.addEventListener('change', () => {
+            updateCharts();
+            updateMetrics();
+        });
         
         // Period selector listeners
         // Fetch data on-demand from API based on selected period
@@ -1020,55 +1038,81 @@
         }
 
         function updateMetrics() {
-            if (!currentData) return;
+            if (dataHistory.length === 0) {
+                console.log('No data history available');
+                return;
+            }
 
-            // Calculate total load across all countries
+            // Use selected country for metrics
+            const selectedCountry = globalCountrySelector.value;
+            
+            // Calculate metrics from ALL data points in the loaded period
             let totalLoad = 0;
             let totalPrice = 0;
             let totalRenewable = 0;
-            let totalGeneration = 0;
+            let totalForecastError = 0;
+            let loadCount = 0;
             let priceCount = 0;
-            let accuracySum = 0;
-            let accuracyCount = 0;
-
-            Object.values(currentData.countries).forEach(country => {
-                if (country.load_actual) {
+            let renewableCount = 0;
+            let forecastCount = 0;
+            
+            dataHistory.forEach(point => {
+                const country = point.countries[selectedCountry];
+                if (!country) return;
+                
+                // Sum up load
+                if (country.load_actual != null) {
                     totalLoad += country.load_actual;
+                    loadCount++;
                 }
-                if (country.price_day_ahead) {
+                
+                // Sum up prices
+                if (country.price_day_ahead != null) {
                     totalPrice += country.price_day_ahead;
                     priceCount++;
                 }
-                if (country.solar_generation) {
-                    totalRenewable += country.solar_generation;
-                    totalGeneration += country.solar_generation;
-                }
-                if (country.wind_generation) {
-                    totalRenewable += country.wind_generation;
-                    totalGeneration += country.wind_generation;
+                
+                // Sum up renewables
+                const solar = country.solar_generation ?? 0;
+                const wind = country.wind_generation ?? 0;
+                const renewableGen = solar + wind;
+                
+                if (country.load_actual != null && country.load_actual > 0) {
+                    const renewablePct = (renewableGen / country.load_actual) * 100;
+                    totalRenewable += renewablePct;
+                    renewableCount++;
                 }
                 
                 // Calculate forecast accuracy
-                if (country.load_actual && country.load_forecast) {
+                if (country.load_actual != null && country.load_forecast != null && country.load_actual > 0) {
                     const accuracy = 100 - Math.abs((country.load_actual - country.load_forecast) / country.load_actual * 100);
-                    accuracySum += Math.max(0, accuracy);
-                    accuracyCount++;
+                    totalForecastError += Math.max(0, accuracy);
+                    forecastCount++;
                 }
+            });
+            
+            // Calculate averages
+            const avgLoad = loadCount > 0 ? totalLoad / loadCount : null;
+            const avgPrice = priceCount > 0 ? totalPrice / priceCount : null;
+            const avgRenewable = renewableCount > 0 ? totalRenewable / renewableCount : null;
+            const avgForecastAccuracy = forecastCount > 0 ? totalForecastError / forecastCount : null;
+            
+            console.log(`Metrics for ${selectedCountry} (${dataHistory.length} points):`, {
+                avgLoad, avgPrice, avgRenewable, avgForecastAccuracy
             });
 
             // Update metric displays
             document.getElementById('totalLoad').textContent = 
-                totalLoad > 0 ? Math.round(totalLoad).toLocaleString() : '--';
+                avgLoad != null ? Math.round(avgLoad).toLocaleString() : '--';
             
             document.getElementById('avgPrice').textContent = 
-                priceCount > 0 ? (totalPrice / priceCount).toFixed(2) : '--';
+                avgPrice != null ? avgPrice.toFixed(2) : '--';
             
-            const renewablePercentage = totalLoad > 0 ? (totalRenewable / totalLoad * 100) : 0;
             document.getElementById('renewableShare').textContent = 
-                renewablePercentage > 0 ? renewablePercentage.toFixed(1) + '%' : '--';
+                avgRenewable != null ? avgRenewable.toFixed(1) + '%' : '--';
             
             document.getElementById('forecastAccuracy').textContent = 
-                accuracyCount > 0 ? (accuracySum / accuracyCount).toFixed(1) + '%' : '--';
+                avgForecastAccuracy != null ? avgForecastAccuracy.toFixed(1) + '%' : '--';
         }
 
         // Initialize
@@ -1084,16 +1128,28 @@
         const modalTitle = document.getElementById('modalTitle');
         const modalChartCanvas = document.getElementById('modalChart');
 
-        // Add click listeners to chart cards
+        // Add click listeners to chart cards and gadgets
         document.querySelectorAll('.card.clickable').forEach(card => {
             card.addEventListener('click', function(e) {
-                // Don't open modal if clicking on selectors
-                if (e.target.tagName === 'SELECT' || e.target.closest('.card-controls')) {
+                // Don't open modal if clicking on interactive elements
+                if (e.target.tagName === 'SELECT' || 
+                    e.target.tagName === 'INPUT' || 
+                    e.target.tagName === 'BUTTON' ||
+                    e.target.tagName === 'A' ||
+                    e.target.closest('.card-controls') ||
+                    e.target.closest('button') ||
+                    e.target.closest('input')) {
                     return;
                 }
                 
                 const chartType = this.getAttribute('data-chart');
-                openModal(chartType);
+                const gadgetType = this.getAttribute('data-gadget');
+                
+                if (chartType) {
+                    openModal(chartType);
+                } else if (gadgetType) {
+                    openGadgetModal(gadgetType);
+                }
             });
         });
 
@@ -1290,6 +1346,192 @@
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape' && modal.classList.contains('active')) {
                 closeModal();
+            }
+            if (e.key === 'Escape' && gadgetModal.classList.contains('active')) {
+                closeGadgetModal();
+            }
+        });
+
+        // Gadget Modal functionality
+        const gadgetModal = document.getElementById('gadgetModal');
+        const gadgetModalTitle = document.getElementById('gadgetModalTitle');
+        const gadgetModalContent = document.getElementById('gadgetModalContent');
+
+        function openGadgetModal(gadgetType) {
+            gadgetModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            
+            const selectedCountry = globalCountrySelector.value;
+            const countryName = globalCountrySelector.options[globalCountrySelector.selectedIndex].text;
+            
+            if (gadgetType === 'metrics') {
+                gadgetModalTitle.innerHTML = '<i class="fas fa-tachometer-alt"></i> Real-time Metrics - ' + countryName;
+                
+                // Create expanded metrics view
+                let content = '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem; padding: 1rem;">';
+                
+                // Get current metrics
+                const loadValue = document.getElementById('totalLoad').textContent;
+                const priceValue = document.getElementById('avgPrice').textContent;
+                const renewableValue = document.getElementById('renewableShare').textContent;
+                const accuracyValue = document.getElementById('forecastAccuracy').textContent;
+                
+                content += `
+                    <div style="background: rgba(0, 212, 255, 0.1); padding: 2rem; border-radius: 8px; border: 1px solid rgba(0, 212, 255, 0.3); text-align: center;">
+                        <div style="font-size: 3rem; font-weight: bold; color: #00d4ff; margin-bottom: 1rem;">${loadValue}</div>
+                        <div style="font-size: 1.2rem; opacity: 0.9;">Load (MW)</div>
+                        <div style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.7;">Average actual load over selected period</div>
+                    </div>
+                    <div style="background: rgba(255, 107, 107, 0.1); padding: 2rem; border-radius: 8px; border: 1px solid rgba(255, 107, 107, 0.3); text-align: center;">
+                        <div style="font-size: 3rem; font-weight: bold; color: #ff6b6b; margin-bottom: 1rem;">${priceValue}</div>
+                        <div style="font-size: 1.2rem; opacity: 0.9;">Price (€/MWh)</div>
+                        <div style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.7;">Average day-ahead price</div>
+                    </div>
+                    <div style="background: rgba(107, 207, 127, 0.1); padding: 2rem; border-radius: 8px; border: 1px solid rgba(107, 207, 127, 0.3); text-align: center;">
+                        <div style="font-size: 3rem; font-weight: bold; color: #6bcf7f; margin-bottom: 1rem;">${renewableValue}</div>
+                        <div style="font-size: 1.2rem; opacity: 0.9;">Renewable %</div>
+                        <div style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.7;">Solar + Wind generation as % of load</div>
+                    </div>
+                    <div style="background: rgba(255, 217, 61, 0.1); padding: 2rem; border-radius: 8px; border: 1px solid rgba(255, 217, 61, 0.3); text-align: center;">
+                        <div style="font-size: 3rem; font-weight: bold; color: #ffd93d; margin-bottom: 1rem;">${accuracyValue}</div>
+                        <div style="font-size: 1.2rem; opacity: 0.9;">Forecast Accuracy</div>
+                        <div style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.7;">Load forecast accuracy over period</div>
+                    </div>
+                `;
+                content += '</div>';
+                
+                gadgetModalContent.innerHTML = content;
+                
+            } else if (gadgetType === 'news') {
+                gadgetModalTitle.innerHTML = '<i class="fas fa-newspaper"></i> Market News';
+                
+                // Create expanded news view
+                const newsItems = Array.from(document.querySelectorAll('#newsList li'));
+                let content = '<div style="padding: 1rem;">';
+                
+                if (newsItems.length > 0) {
+                    newsItems.forEach((item, index) => {
+                        const link = item.querySelector('a');
+                        if (link) {
+                            content += `
+                                <div style="padding: 1rem; margin-bottom: 1rem; background: rgba(0, 212, 255, 0.05); border-left: 3px solid #00d4ff; border-radius: 4px;">
+                                    <div style="font-size: 0.8rem; color: #00d4ff; margin-bottom: 0.5rem;">Article ${index + 1}</div>
+                                    <a href="${link.href}" target="_blank" style="color: #00d4ff; text-decoration: none; font-size: 1.1rem; display: block; margin-bottom: 0.5rem;">
+                                        ${link.textContent}
+                                    </a>
+                                    <div style="font-size: 0.85rem; opacity: 0.7;">Click to read full article</div>
+                                </div>
+                            `;
+                        }
+                    });
+                } else {
+                    content += '<div style="text-align: center; padding: 3rem; opacity: 0.7;">No news items available yet.</div>';
+                }
+                
+                content += '</div>';
+                gadgetModalContent.innerHTML = content;
+                
+            } else if (gadgetType === 'ai') {
+                gadgetModalTitle.innerHTML = '<i class="fas fa-lightbulb"></i> AI Trading Advisor';
+                
+                // Create expanded AI view with full-size interface
+                let content = `
+                    <div style="padding: 1rem; height: 100%; display: flex; flex-direction: column;">
+                        <div style="margin-bottom: 1rem;">
+                            <input 
+                                list="predefinedQuestions" 
+                                id="modalQuestionInput" 
+                                type="text" 
+                                placeholder="Type your question or select from dropdown..."
+                                style="width: 100%; padding: 0.75rem; background: rgba(0, 212, 255, 0.1); border: 1px solid rgba(0, 212, 255, 0.3); border-radius: 4px; color: #e0e0e0; font-size: 1rem;"
+                            />
+                        </div>
+                        
+                        <button 
+                            id="modalAskButton" 
+                            class="btn btn-primary" 
+                            onclick="askAIFromModal()"
+                            style="width: 100%; margin-bottom: 1rem; padding: 0.75rem; font-size: 1rem;"
+                        >
+                            <i class="fas fa-robot"></i> Ask AI
+                        </button>
+                        
+                        <div id="modalLoadingIndicator" style="display: none; text-align: center; margin-bottom: 1rem; color: #00d4ff; font-size: 1rem;">
+                            <i class="fas fa-spinner fa-spin"></i> AI is thinking...
+                        </div>
+                        
+                        <div id="modalQaSection" style="flex: 1; background: rgba(0, 212, 255, 0.05); padding: 1.5rem; border-radius: 4px; border: 1px solid rgba(0, 212, 255, 0.2); overflow-y: auto;">
+                            <p class="question" id="modalDisplayQuestion" style="margin-bottom: 1rem; font-size: 1.1rem; color: #00d4ff; font-weight: 500;">${document.getElementById('displayQuestion').textContent}</p>
+                            <p class="answer" id="modalDisplayAnswer" style="font-size: 1rem; line-height: 1.6;">${document.getElementById('displayAnswer').textContent}</p>
+                        </div>
+                    </div>
+                `;
+                
+                gadgetModalContent.innerHTML = content;
+                
+                // Add Enter key listener for modal input
+                document.getElementById('modalQuestionInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        askAIFromModal();
+                    }
+                });
+            }
+        }
+
+        function closeGadgetModal() {
+            gadgetModal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Close gadget modal when clicking outside
+        gadgetModal.addEventListener('click', function(e) {
+            if (e.target === gadgetModal) {
+                closeGadgetModal();
+            }
+        });
+
+        // Function to ask AI from modal
+        function askAIFromModal() {
+            const questionInput = document.getElementById('modalQuestionInput');
+            const question = questionInput.value.trim();
+            
+            if (!question) {
+                alert('Please enter a question!');
+                return;
+            }
+            
+            // Show loading state
+            document.getElementById('modalLoadingIndicator').style.display = 'block';
+            document.getElementById('modalAskButton').disabled = true;
+            document.getElementById('modalDisplayQuestion').textContent = question;
+            document.getElementById('modalDisplayAnswer').textContent = 'Processing your question...';
+            
+            // Also update the main dashboard
+            document.getElementById('displayQuestion').textContent = question;
+            document.getElementById('displayAnswer').textContent = 'Processing your question...';
+            
+            // Emit the question to the server
+            socket.emit('askInsight', { question: question });
+        }
+
+        // Update modal when AI response is received
+        socket.on('traderInsight', (insight) => {
+            // Update main dashboard
+            document.getElementById('displayQuestion').textContent = insight.question;
+            document.getElementById('displayAnswer').textContent = insight.answer;
+            document.getElementById('loadingIndicator').style.display = 'none';
+            document.getElementById('askButton').disabled = false;
+            
+            // Update modal if open
+            const modalQuestion = document.getElementById('modalDisplayQuestion');
+            const modalAnswer = document.getElementById('modalDisplayAnswer');
+            if (modalQuestion && modalAnswer) {
+                modalQuestion.textContent = insight.question;
+                modalAnswer.textContent = insight.answer;
+                const modalLoading = document.getElementById('modalLoadingIndicator');
+                const modalButton = document.getElementById('modalAskButton');
+                if (modalLoading) modalLoading.style.display = 'none';
+                if (modalButton) modalButton.disabled = false;
             }
         });
     </script>
