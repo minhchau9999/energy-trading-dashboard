@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Energy Trading Dashboard</title>
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         * {
@@ -127,6 +124,7 @@
             padding: 1rem;
             display: grid;
             grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: 45% 55%;
             grid-gap: 1rem;
             height: calc(100vh - 180px);
             overflow: hidden;
@@ -650,6 +648,11 @@
             </div>
         </div>
     </div>
+
+    <!-- Load external JavaScript libraries first -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 
     <script>
         // Socket.IO connection

@@ -7,7 +7,7 @@ class DatabaseManager {
             port: process.env.DB_PORT || 5433,
             database: process.env.DB_NAME || 'energytrading',
             user: process.env.DB_USER || 'postgres',
-            password: process.env.DB_PASSWORD || 'postgres'
+            password: process.env.DB_PASSWORD || '' // Empty password when using trust auth
         });
     }
 
