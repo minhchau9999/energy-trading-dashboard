@@ -687,19 +687,6 @@
                         labels: {
                             color: 'white'
                         }
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        backgroundColor: 'rgba(0, 0, 0, 0.9)',
-                        titleColor: '#00d4ff',
-                        bodyColor: '#ffffff',
-                        borderColor: '#00d4ff',
-                        borderWidth: 2,
-                        padding: 10,
-                        bodySpacing: 4,
-                        titleFont: { size: 12, weight: 'bold' },
-                        bodyFont: { size: 11 }
                     }
                 },
                 scales: {
@@ -1074,10 +1061,6 @@
                 if (chart.options.plugins && chart.options.plugins.annotation) {
                     chart.options.plugins.annotation.annotations = {};
                 }
-                // Remove custom tooltip callback
-                if (chart.options.plugins.tooltip && chart.options.plugins.tooltip.callbacks) {
-                    delete chart.options.plugins.tooltip.callbacks.afterBody;
-                }
                 return;
             }
 
@@ -1088,71 +1071,8 @@
                 if (chart.options.plugins && chart.options.plugins.annotation) {
                     chart.options.plugins.annotation.annotations = {};
                 }
-                // Remove custom tooltip callback
-                if (chart.options.plugins.tooltip && chart.options.plugins.tooltip.callbacks) {
-                    delete chart.options.plugins.tooltip.callbacks.afterBody;
-                }
                 return;
             }
-
-            // Add custom tooltip callback to show events
-            if (!chart.options.plugins.tooltip) {
-                chart.options.plugins.tooltip = {};
-            }
-            if (!chart.options.plugins.tooltip.callbacks) {
-                chart.options.plugins.tooltip.callbacks = {};
-            }
-            
-            chart.options.plugins.tooltip.callbacks.afterBody = function(tooltipItems) {
-                if (tooltipItems.length === 0) return [];
-                
-                const xValue = tooltipItems[0].parsed.x;
-                const eventTime = new Date(xValue);
-                
-                // Find events within 30 minutes of the tooltip time
-                const nearbyEvents = countryEvents.filter(event => {
-                    const evtTime = new Date(event.event_time);
-                    const timeDiff = Math.abs(evtTime - eventTime);
-                    return timeDiff <= 30 * 60 * 1000; // 30 minutes in milliseconds
-                });
-                
-                if (nearbyEvents.length === 0) return [];
-                
-                const lines = ['\n━━━ EVENTS ━━━'];
-                nearbyEvents.forEach(event => {
-                    const eventType = event.event_type;
-                    const eventCategory = event.event_category || 'GENERATION';
-                    const isUnplanned = eventType.includes('UNPLANNED');
-                    
-                    // Get icon based on category
-                    let icon;
-                    switch(eventCategory) {
-                        case 'MARKET': icon = eventType === 'PRICE_SPIKE' ? '💰' : '📈'; break;
-                        case 'ENVIRONMENTAL': icon = '🌤️'; break;
-                        case 'TRANSMISSION': icon = isUnplanned ? '⚡' : '🔌'; break;
-                        case 'OFFSHORE': icon = isUnplanned ? '🌊' : '🔵'; break;
-                        case 'NUCLEAR': icon = isUnplanned ? '☢️' : '⚛️'; break;
-                        case 'HYDRO': icon = isUnplanned ? '💧' : '🌊'; break;
-                        case 'THERMAL': icon = isUnplanned ? '🔥' : '♨️'; break;
-                        case 'RENEWABLE': icon = isUnplanned ? '🍃' : '♻️'; break;
-                        default: icon = isUnplanned ? '⚠️' : '🔧';
-                    }
-                    
-                    const affectedCapacity = event.affected_cap || event.affected_capacity || 0;
-                    const title = event.title || eventType;
-                    
-                    lines.push(`${icon} ${title}`);
-                    if (affectedCapacity > 0) {
-                        lines.push(`   Capacity: ${Math.round(affectedCapacity)} MW`);
-                    }
-                    lines.push(`   Type: ${eventCategory}`);
-                    if (event.description) {
-                        lines.push(`   ${event.description.substring(0, 40)}...`);
-                    }
-                });
-                
-                return lines;
-            };
 
             // Create annotations for each event
             const annotations = {};
@@ -1228,6 +1148,38 @@
                     label: {
                         display: true,
                         content: labelContent,
+                        position: 'start',
+                        backgroundColor: color,
+                        color: '#fff',
+                        font: {
+                            size: 10
+                        },
+                        padding: 4
+                    }
+                };
+            });
+
+            // Initialize annotation plugin options if not exists
+                    icon = isUnplanned ? '⚡' : '�'; // Lightning or plug
+                } else if (eventCategory === 'OFFSHORE') {
+                    icon = isUnplanned ? '🌊' : '🔵'; // Wave or blue circle
+                } else {
+                    icon = isUnplanned ? '⚠️' : '🔧'; // Warning or wrench
+                }
+                
+                // Use affected_cap (new column name) instead of affected_capacity
+                const affectedCapacity = event.affected_cap || event.affected_capacity || 0;
+                
+                annotations[`event_${index}`] = {
+                    type: 'line',
+                    xMin: eventTime,
+                    xMax: eventTime,
+                    borderColor: color,
+                    borderWidth: 2,
+                    borderDash: borderDash,
+                    label: {
+                        display: true,
+                        content: `${icon} ${Math.round(affectedCapacity)} MW`,
                         position: 'start',
                         backgroundColor: color,
                         color: '#fff',
@@ -1482,16 +1434,11 @@
                         tooltip: {
                             mode: 'index',
                             intersect: false,
-                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
                             titleColor: '#00d4ff',
                             bodyColor: '#ffffff',
                             borderColor: '#00d4ff',
-                            borderWidth: 2,
-                            padding: 12,
-                            bodySpacing: 6,
-                            titleFont: { size: 14, weight: 'bold' },
-                            bodyFont: { size: 12 },
-                            footerFont: { size: 11 }
+                            borderWidth: 1
                         }
                     },
                     scales: {
@@ -1541,10 +1488,6 @@
                     }
                 }
             });
-            
-            // Add event annotations to modal chart
-            addEventAnnotations(modalChartInstance, selectedCountry);
-            modalChartInstance.update('none');
         }
 
         function closeModal() {

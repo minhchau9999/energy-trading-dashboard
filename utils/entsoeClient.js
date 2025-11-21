@@ -16,7 +16,9 @@ const BIDDING_ZONES = {
     'HU': '10YHU-MAVIR----U', // Hungary - Excellent data quality
     'FI': '10YFI-1--------U', // Finland - Complete Nordic data
     'SE': '10YSE-1--------K', // Sweden - Nordic region
-    'DE': '10Y1001A1001A83F'  // Germany - Major European market
+    'DE': '10Y1001A1001A83F', // Germany - Major European market
+    'FR': '10YFR-RTE------C', // France - Excellent event data
+    'NL': '10YNL----------L'  // Netherlands - Good availability
 };
 
 class EntsoeClient {
@@ -120,6 +122,153 @@ class EntsoeClient {
         console.log(`ENTSO-E ${countryCode}: Found ${seriesCount} time series, ${headlines.length} significant outages (>100 MW)`);
 
         return headlines;
+    }
+
+    /**
+     * Parse outages and return structured event data for database storage
+     * @param {string} xmlData - The XML response from the API
+     * @param {string} countryCode - The country code
+     * @param {string} category - Event category (GENERATION, TRANSMISSION, OFFSHORE)
+     * @returns {Array} - Array of event objects
+     */
+    parseOutageEvents(xmlData, countryCode, category = 'GENERATION') {
+        const events = [];
+        
+        if (xmlData.includes('Acknowledgement_MarketDocument')) {
+            return events;
+        }
+        
+        const outageMatches = xmlData.matchAll(/<unavailability_Time_Series>(.*?)<\/unavailability_Time_Series>/gs);
+
+        for (const match of outageMatches) {
+            const series = match[1];
+            
+            const businessTypeMatch = series.match(/<businessType>(A\d+)<\/businessType>/);
+            const quantityMatch = series.match(/<quantity>(\d+\.\d+)<\/quantity>/);
+            const unitNameMatch = series.match(/<name>(.*?)<\/name>/);
+            
+            // Extract time period
+            const periodMatch = series.match(/<Time_Period>(.*?)<\/Time_Period>/s);
+            let startTime = null, endTime = null;
+            
+            if (periodMatch) {
+                const period = periodMatch[1];
+                const startMatch = period.match(/<start>(.*?)<\/start>/);
+                const endMatch = period.match(/<end>(.*?)<\/end>/);
+                
+                if (startMatch) {
+                    startTime = new Date(startMatch[1]);
+                }
+                if (endMatch) {
+                    endTime = new Date(endMatch[1]);
+                }
+            }
+
+            if (quantityMatch && unitNameMatch && startTime) {
+                const powerLost = parseFloat(quantityMatch[1]);
+                const unitName = unitNameMatch[1];
+                const businessType = businessTypeMatch ? businessTypeMatch[1] : 'Unknown';
+
+                if (powerLost > 50) { // Include events with >50 MW impact
+                    const eventType = businessType === 'A53' ? 'UNPLANNED_OUTAGE' : 'PLANNED_OUTAGE';
+                    
+                    // Customize description based on category
+                    let description = '';
+                    if (category === 'TRANSMISSION') {
+                        description = `Transmission line offline, ${Math.round(powerLost)} MW capacity affected`;
+                    } else if (category === 'OFFSHORE') {
+                        description = `Offshore grid connection offline, ${Math.round(powerLost)} MW capacity affected`;
+                    } else {
+                        description = `Generation unit offline, ${Math.round(powerLost)} MW capacity affected`;
+                    }
+                    
+                    events.push({
+                        event_time: startTime,
+                        event_end_time: endTime,
+                        country: countryCode,
+                        event_type: eventType,
+                        event_category: category,
+                        title: `${eventType === 'UNPLANNED_OUTAGE' ? 'Unplanned' : 'Planned'} ${category}: ${unitName}`,
+                        description: description,
+                        affected_capacity: powerLost,
+                        unit_name: unitName,
+                        source: 'ENTSOE'
+                    });
+                }
+            }
+        }
+        
+        return events;
+    }
+
+    /**
+     * Fetch outage events for storage in database
+     * @param {string} countryCode - Country code
+     * @param {Date} startDate - Start date
+     * @param {Date} endDate - End date
+     * @returns {Promise<Array>} - Array of event objects
+     */
+    async getOutageEvents(countryCode, startDate = null, endDate = null) {
+        const biddingZone = BIDDING_ZONES[countryCode];
+        if (!biddingZone) {
+            console.warn(`No bidding zone found for country: ${countryCode}`);
+            return [];
+        }
+
+        // Default to last 30 days
+        if (!startDate) {
+            startDate = subDays(new Date(), 30);
+        }
+        if (!endDate) {
+            endDate = new Date();
+        }
+
+        // Fetch multiple document types: generation, transmission, offshore
+        const documentTypes = [
+            { code: 'A80', name: 'Generation', category: 'GENERATION' },
+            { code: 'A79', name: 'Transmission', category: 'TRANSMISSION' },
+            { code: 'A78', name: 'Offshore Grid', category: 'OFFSHORE' }
+        ];
+
+        let allEvents = [];
+
+        for (const docType of documentTypes) {
+            const params = {
+                securityToken: this.apiKey,
+                documentType: docType.code,
+                // No businessType filter - get ALL events (planned + unplanned)
+                biddingZone_Domain: biddingZone,
+                periodStart: format(startOfDay(startDate), 'yyyyMMddHHmm'),
+                periodEnd: format(endOfDay(endDate), 'yyyyMMddHHmm'),
+            };
+
+            try {
+                console.log(`  Fetching ${docType.name} events (${docType.code})...`);
+                const response = await axios.get(API_BASE_URL, { 
+                    params,
+                    httpsAgent
+                });
+
+                const events = this.parseOutageEvents(response.data, countryCode, docType.category);
+                allEvents = allEvents.concat(events);
+                console.log(`    ${docType.name}: ${events.length} events`);
+
+            } catch (error) {
+                if (error.response && error.response.status === 400) {
+                    // 400 often means no data available for this document type
+                    console.log(`    ${docType.name}: No data available`);
+                } else if (error.response) {
+                    console.error(`    ${docType.name} API Error: ${error.response.status}`);
+                } else {
+                    console.error(`    ${docType.name} Error: ${error.message}`);
+                }
+            }
+
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+        return allEvents;
     }
 
     /**

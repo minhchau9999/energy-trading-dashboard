@@ -7,12 +7,15 @@ const path = require('path');
 const fs = require('fs');
 const { parse } = require('csv-parse');
 const Parser = require('rss-parser');
+const { subDays, format } = require('date-fns');
 const EnergyDataProcessor = require('./utils/dataProcessor');
 const TradingMetrics = require('./utils/tradingMetrics');
 const DatabaseManager = require('./utils/databaseManager');
 const EntsoeClient = require('./utils/entsoeClient');
 const EntsoeDataManager = require('./utils/entsoeDataManager');
 const AIInsightsService = require('./utils/aiInsightsService');
+const RTEClient = require('./utils/rteClient');
+const NordPoolClient = require('./utils/nordPoolClient');
 
 const app = express();
 const server = http.createServer(app);
@@ -166,7 +169,131 @@ async function fetchEntsoeNews() {
     }
 }
 
-// Fetch all news sources
+// Parse news headlines for trading-relevant events
+async function parseNewsForEvents(newsItems) {
+    const events = [];
+    
+    // Expanded keywords for trading-relevant events
+    const outageKeywords = /outage|offline|shutdown|maintenance|unavailable|down|failure|trip|forced\s+stop|fault|breakdown|disconnected/i;
+    const plannedKeywords = /planned|scheduled|maintenance|upcoming/i;
+    const unplannedKeywords = /unplanned|emergency|forced|unexpected|sudden|trip|alarm|fault|failure/i;
+    
+    // Additional trading-relevant event types
+    const priceSpike = /price\s+spike|price\s+surge|record\s+high|skyrocket|soar/i;
+    const demandSurge = /demand\s+surge|demand\s+spike|high\s+demand|peak\s+demand|strain|shortage/i;
+    const weatherImpact = /storm|hurricane|heatwave|cold\s+snap|freeze|extreme\s+weather|wind\s+speed|low\s+wind/i;
+    const supplyIssue = /supply\s+shortage|supply\s+disruption|capacity\s+constraint|grid\s+stress|blackout|brownout/i;
+    const interconnector = /interconnector|cable\s+fault|import|export|cross-border|transmission\s+capacity/i;
+    
+    // Country mapping
+    const countryMap = {
+        'Poland': 'PL', 'Polish': 'PL',
+        'Hungary': 'HU', 'Hungarian': 'HU',
+        'Finland': 'FI', 'Finnish': 'FI', 'Nordic': 'FI',
+        'France': 'FR', 'French': 'FR',
+        'Netherlands': 'NL', 'Dutch': 'NL',
+        'Germany': 'DE', 'German': 'DE',
+        'Sweden': 'SE', 'Swedish': 'SE'
+    };
+    
+    for (const item of newsItems) {
+        const text = `${item.headline} ${item.description || ''}`;
+        
+        // Determine event type and category based on keywords
+        let eventType = null;
+        let category = null;
+        let isRelevant = false;
+        
+        // Check for outages (primary events)
+        if (outageKeywords.test(text)) {
+            isRelevant = true;
+            eventType = unplannedKeywords.test(text) ? 'UNPLANNED_OUTAGE' : 'PLANNED_OUTAGE';
+            
+            if (/transmission|grid|line|interconnector/i.test(text)) {
+                category = 'TRANSMISSION';
+            } else if (/offshore|wind\s+farm|subsea/i.test(text)) {
+                category = 'OFFSHORE';
+            } else {
+                category = 'GENERATION';
+            }
+        }
+        // Check for price spikes
+        else if (priceSpike.test(text)) {
+            isRelevant = true;
+            eventType = 'PRICE_SPIKE';
+            category = 'MARKET';
+        }
+        // Check for demand surges
+        else if (demandSurge.test(text)) {
+            isRelevant = true;
+            eventType = 'DEMAND_SURGE';
+            category = 'MARKET';
+        }
+        // Check for weather impacts
+        else if (weatherImpact.test(text)) {
+            isRelevant = true;
+            eventType = 'WEATHER_EVENT';
+            category = 'ENVIRONMENTAL';
+        }
+        // Check for supply issues
+        else if (supplyIssue.test(text)) {
+            isRelevant = true;
+            eventType = 'SUPPLY_ISSUE';
+            category = 'MARKET';
+        }
+        // Check for interconnector events
+        else if (interconnector.test(text)) {
+            isRelevant = true;
+            eventType = 'INTERCONNECTOR';
+            category = 'TRANSMISSION';
+        }
+        
+        if (!isRelevant) continue;
+        
+        // Extract capacity (MW, GW) - optional for non-outage events
+        const mwMatch = text.match(/(\d+(?:,\d+)?(?:\.\d+)?)\s*MW/i);
+        const gwMatch = text.match(/(\d+(?:,\d+)?(?:\.\d+)?)\s*GW/i);
+        let capacity = null;
+        if (gwMatch) {
+            capacity = parseFloat(gwMatch[1].replace(',', '')) * 1000; // Convert GW to MW
+        } else if (mwMatch) {
+            capacity = parseFloat(mwMatch[1].replace(',', ''));
+        }
+        
+        // For outages, require capacity; for other events, it's optional
+        if ((eventType.includes('OUTAGE') && (!capacity || capacity < 50))) continue;
+        
+        // Extract country
+        let country = null;
+        for (const [name, code] of Object.entries(countryMap)) {
+            if (new RegExp(name, 'i').test(text)) {
+                country = code;
+                break;
+            }
+        }
+        
+        // Create event - for non-outage events, capacity is optional
+        // For outage events, we already filtered by capacity above
+        if (country) {
+            events.push({
+                event_time: item.pubDate ? new Date(item.pubDate) : new Date(),
+                event_end_time: null,
+                country: country,
+                event_type: eventType,
+                event_category: category,
+                title: item.headline.substring(0, 200),
+                description: text.substring(0, 500),
+                affected_cap: capacity, // May be null for non-outage events
+                unit_name: 'News Source',
+                source: item.source || 'NEWS'
+            });
+        }
+    }
+    
+    return events;
+}
+
+// Fetch all news sources and extract events
 async function fetchAllNews() {
     try {
         const [energyNews, entsoeNews] = await Promise.all([
@@ -179,6 +306,14 @@ async function fetchAllNews() {
         lastReutersFetch = Date.now();
 
         console.log(`Total news items in cache: ${newsCache.length}`);
+        
+        // Parse news for events and store them
+        const newsEvents = await parseNewsForEvents(newsCache);
+        if (newsEvents.length > 0) {
+            const insertedCount = await dbManager.insertEvents(newsEvents);
+            console.log(`📰 Extracted ${insertedCount} events from news headlines`);
+        }
+        
         return newsCache;
     } catch (error) {
         console.error('Error fetching news:', error);
@@ -387,6 +522,9 @@ async function initializeData() {
                 console.log(`✅ AI Insights Service ready (Model: ${status.model}, Enabled: ${status.enabled})`);
             }
             
+            // Fetch events from ENTSO-E
+            await fetchAndStoreEvents();
+            
             startRealtimeDataRefresh();
             return;
         } catch (entsoeError) {
@@ -398,6 +536,70 @@ async function initializeData() {
         console.error('💡 Make sure your ENTSO-E API key is correctly set in .env file');
         console.error('   Get your API key from: https://transparency.entsoe.eu/');
         process.exit(1);
+    }
+}
+
+// Fetch and store events from ENTSO-E
+async function fetchAndStoreEvents(days = 365) {
+    try {
+        const eventCount = await dbManager.getEventCount();
+        console.log(`\n📅 Event database contains ${eventCount} events`);
+        
+        let allEvents = [];
+        
+        // 1. Fetch from ENTSO-E (all countries)
+        if (entsoeClient) {
+            console.log(`📡 Fetching events from ENTSO-E (last ${days} days)...`);
+            const chunkSize = 90;
+            const countries = ['PL', 'HU', 'FI', 'FR', 'NL'];
+            const endDate = new Date();
+            
+            for (let i = 0; i < days; i += chunkSize) {
+                const chunkStart = subDays(endDate, Math.min(i + chunkSize, days));
+                const chunkEnd = subDays(endDate, i);
+                
+                console.log(`  Chunk: ${format(chunkStart, 'yyyy-MM-dd')} to ${format(chunkEnd, 'yyyy-MM-dd')}`);
+                
+                for (const country of countries) {
+                    const events = await entsoeClient.getOutageEvents(country, chunkStart, chunkEnd);
+                    allEvents = allEvents.concat(events);
+                    console.log(`    ${country}: ${events.length} events`);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+        } else {
+            console.log('⚠️  ENTSO-E client not available');
+        }
+        
+        // 2. Fetch from RTE (France only)
+        console.log(`\n📡 Fetching events from RTE (France)...`);
+        try {
+            const rteEvents = await RTEClient.fetchUnavailabilitiesChunked(Math.min(days, 30));
+            allEvents = allEvents.concat(rteEvents);
+            console.log(`  FR (RTE): ${rteEvents.length} events`);
+        } catch (error) {
+            console.log(`  RTE fetch error: ${error.message}`);
+        }
+        
+        // 3. Fetch from Nord Pool (Nordic countries)
+        console.log(`\n📡 Fetching events from Nord Pool (Nordic)...`);
+        try {
+            const nordPoolEvents = await NordPoolClient.fetchEventsChunked(Math.min(days, 30));
+            allEvents = allEvents.concat(nordPoolEvents);
+            console.log(`  Nord Pool: ${nordPoolEvents.length} events`);
+        } catch (error) {
+            console.log(`  Nord Pool fetch error: ${error.message}`);
+        }
+        
+        // 4. Insert all events into database
+        if (allEvents.length > 0) {
+            const insertedCount = await dbManager.insertEvents(allEvents);
+            console.log(`\n✅ Total: ${allEvents.length} events fetched, ${insertedCount} new inserted\n`);
+        } else {
+            console.log('\nℹ️  No new events found from any source\n');
+        }
+    } catch (error) {
+        console.error('❌ Error fetching events:', error.message);
     }
 }
 
@@ -426,6 +628,49 @@ function startRealtimeDataRefresh() {
                 console.log(`Real-time data refreshed`);
                 console.log(`Total data points: ${dbData.length}`);
             }
+            
+            // Fetch new events for the last 2 days from all sources
+            console.log('🔄 Checking for new events from all sources...');
+            let newEvents = [];
+            
+            // ENTSO-E events
+            if (entsoeClient) {
+                const countries = ['PL', 'HU', 'FI', 'FR', 'NL'];
+                for (const country of countries) {
+                    const events = await entsoeClient.getOutageEvents(country, subDays(new Date(), 2), new Date());
+                    newEvents = newEvents.concat(events);
+                }
+                console.log(`  ENTSO-E: ${newEvents.length} events`);
+            }
+            
+            // RTE events (France)
+            try {
+                const rteEvents = await RTEClient.getUnavailabilities(subDays(new Date(), 2), new Date());
+                newEvents = newEvents.concat(rteEvents);
+                console.log(`  RTE: ${rteEvents.length} events`);
+            } catch (error) {
+                console.log(`  RTE error: ${error.message}`);
+            }
+            
+            // Nord Pool events
+            try {
+                const nordPoolEvents = await NordPoolClient.getSystemMessages(subDays(new Date(), 2), new Date());
+                newEvents = newEvents.concat(nordPoolEvents);
+                console.log(`  Nord Pool: ${nordPoolEvents.length} events`);
+            } catch (error) {
+                console.log(`  Nord Pool error: ${error.message}`);
+            }
+            
+            if (newEvents.length > 0) {
+                const insertedCount = await dbManager.insertEvents(newEvents);
+                console.log(`✅ Added ${insertedCount} new events to database (total: ${newEvents.length})`);
+                
+                // Broadcast new events to connected clients
+                io.emit('newEvents', newEvents);
+            } else {
+                console.log('ℹ️  No new events found from any source');
+            }
+            
         } catch (error) {
             console.error('⚠️  Real-time refresh failed:', error.message);
         }
@@ -1066,16 +1311,125 @@ app.get('/api/data/period', async (req, res) => {
         // Process each data point
         processedData = rawData.map(point => processDataPoint(point));
         
+        // Fetch events for the same period
+        const events = await dbManager.getEventsInRange(
+            cutoffDate.toISOString(),
+            now.toISOString(),
+            ['PL', 'HU', 'FI']
+        );
+        
         res.json({
             success: true,
             period: period,
             dataPoints: processedData.length,
+            eventCount: events.length,
             cutoffDate: cutoffDate.toISOString(),
             aggregation: shouldAggregate ? aggregationInterval : 'none',
-            data: processedData
+            data: processedData,
+            events: events
         });
     } catch (error) {
         console.error('Error querying period data:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Fetch and store events from ENTSO-E
+app.post('/api/events/refresh', async (req, res) => {
+    if (!entsoeClient) {
+        return res.json({
+            success: false,
+            error: 'ENTSO-E API key not configured'
+        });
+    }
+
+    try {
+        const days = parseInt(req.query.days) || 30;
+        const startDate = subDays(new Date(), days);
+        const endDate = new Date();
+        
+        console.log(`\n📅 Fetching events for PL, HU, FI (last ${days} days)...`);
+        
+        const countries = ['PL', 'HU', 'FI'];
+        let allEvents = [];
+        
+        for (const country of countries) {
+            const events = await entsoeClient.getOutageEvents(country, startDate, endDate);
+            allEvents = allEvents.concat(events);
+            console.log(`  ${country}: ${events.length} events found`);
+        }
+        
+        if (allEvents.length > 0) {
+            const insertedCount = await dbManager.insertEvents(allEvents);
+            console.log(`✅ Inserted ${insertedCount} new events into database\n`);
+            
+            res.json({
+                success: true,
+                message: `Fetched ${allEvents.length} events, inserted ${insertedCount} new events`,
+                totalEvents: allEvents.length,
+                insertedEvents: insertedCount
+            });
+        } else {
+            res.json({
+                success: true,
+                message: 'No events found',
+                totalEvents: 0,
+                insertedEvents: 0
+            });
+        }
+    } catch (error) {
+        console.error('Error refreshing events:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Get events for a specific period
+app.get('/api/events', async (req, res) => {
+    try {
+        const period = req.query.period || 'last-30-days';
+        const countries = req.query.countries ? req.query.countries.split(',') : ['PL', 'HU', 'FI'];
+        
+        const now = new Date();
+        let cutoffDate;
+        
+        switch(period) {
+            case 'last-24-hours':
+                cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                break;
+            case 'last-7-days':
+                cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                break;
+            case 'last-30-days':
+                cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                break;
+            case 'last-90-days':
+                cutoffDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+                break;
+            default:
+                cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        }
+        
+        const events = await dbManager.getEventsInRange(
+            cutoffDate.toISOString(),
+            now.toISOString(),
+            countries
+        );
+        
+        res.json({
+            success: true,
+            period: period,
+            eventCount: events.length,
+            cutoffDate: cutoffDate.toISOString(),
+            events: events
+        });
+    } catch (error) {
+        console.error('Error querying events:', error);
         res.status(500).json({
             success: false,
             error: error.message

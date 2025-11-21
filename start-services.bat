@@ -39,29 +39,65 @@ if errorlevel 1 (
 
 REM Wait for database to be ready
 echo %YELLOW%   Waiting for database to be ready...%RESET%
-timeout /t 3 >nul
+timeout /t 5 >nul
+
+REM Kill any existing node processes first
+taskkill /f /im node.exe >nul 2>&1
 
 REM Start Dashboard Server
 echo %BLUE%2. Starting Dashboard Server...%RESET%
-start "Energy Trading Dashboard" /min cmd /c "cd /d %~dp0 && set NODE_TLS_REJECT_UNAUTHORIZED=0 && node server.js"
+echo %YELLOW%   Please wait, this may take 30-60 seconds...%RESET%
+start "Energy Trading Dashboard" /min cmd /c "cd /d %~dp0 && set NODE_TLS_REJECT_UNAUTHORIZED=0 && node server.js > server.log 2>&1"
+
+REM Wait and check for server startup with retry logic
+set /a attempts=0
+set /a max_attempts=30
+
+:check_server
+set /a attempts+=1
 timeout /t 2 >nul
 
-REM Check if dashboard is running
-netstat -an | find "3000" >nul 2>&1
-if errorlevel 1 (
-    echo %RED%❌ Dashboard server may not be running properly%RESET%
-) else (
-    echo %GREEN%✅ Dashboard server started%RESET%
+REM Check if port 3000 is listening
+netstat -an | find ":3000" | find "LISTENING" >nul 2>&1
+if not errorlevel 1 (
+    echo %GREEN%✅ Dashboard server started successfully%RESET%
     echo %BLUE%   🌐 Available at: http://localhost:3000%RESET%
+    goto server_ready
 )
 
+REM Check if node process is running
+tasklist | find "node.exe" >nul 2>&1
+if errorlevel 1 (
+    echo %RED%❌ Dashboard server failed to start%RESET%
+    echo %YELLOW%   Check server.log for errors%RESET%
+    goto end
+)
+
+if %attempts% lss %max_attempts% (
+    echo %YELLOW%   Waiting for server... [%attempts%/%max_attempts%]%RESET%
+    goto check_server
+)
+
+echo %RED%❌ Dashboard server did not start within expected time%RESET%
+echo %YELLOW%   Check server.log for details%RESET%
+goto end
+
+:server_ready
 echo.
-echo %GREEN%🎉 Services started successfully!%RESET%
-echo %YELLOW%   - TimescaleDB: localhost:5433%RESET%
-echo %YELLOW%   - Dashboard: http://localhost:3000%RESET%
+echo %GREEN%🎉 All services started successfully!%RESET%
 echo.
-echo %BLUE%To start streaming ingestion:%RESET%
-echo %YELLOW%   start-services.bat streaming%RESET%
+echo %YELLOW%Service Status:%RESET%
+echo %GREEN%   ✅ TimescaleDB: Running on localhost:5433%RESET%
+echo %GREEN%   ✅ Dashboard: Running on http://localhost:3000%RESET%
+echo.
+echo %BLUE%📝 Logs:%RESET%
+echo %YELLOW%   Server logs: server.log%RESET%
+echo.
+echo %BLUE%💡 Next steps:%RESET%
+echo %YELLOW%   1. Open http://localhost:3000 in your browser%RESET%
+echo %YELLOW%   2. Check server.log if you encounter any issues%RESET%
+echo %YELLOW%   3. Use 'start-services.bat stop' to stop all services%RESET%
+echo.
 goto end
 
 :stop

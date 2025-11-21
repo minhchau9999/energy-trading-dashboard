@@ -74,7 +74,31 @@ class DatabaseManager {
                 CREATE INDEX IF NOT EXISTS idx_timestamp ON energy_data (timestamp DESC);
             `);
 
-            console.log('✅ Database schema initialized');
+            // Create events table for outages and important events
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS energy_events (
+                    id SERIAL PRIMARY KEY,
+                    country VARCHAR(2) NOT NULL,
+                    event_time TIMESTAMPTZ NOT NULL,
+                    event_end_time TIMESTAMPTZ,
+                    event_type VARCHAR(50) NOT NULL,
+                    event_category VARCHAR(50),
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    affected_cap DOUBLE PRECISION,
+                    unit_name TEXT,
+                    source VARCHAR(50) DEFAULT 'ENTSOE'
+                );
+            `);
+
+            // Create indexes for events
+            await client.query(`
+                CREATE INDEX IF NOT EXISTS idx_events_time ON energy_events (event_time DESC);
+                CREATE INDEX IF NOT EXISTS idx_events_country ON energy_events (country);
+                CREATE INDEX IF NOT EXISTS idx_events_type ON energy_events (event_type);
+            `);
+
+            console.log('✅ Database schema initialized (including events table)');
             client.release();
             return true;
         } catch (error) {
@@ -222,6 +246,99 @@ class DatabaseManager {
     async close() {
         await this.pool.end();
         console.log('🔌 Database connection closed');
+    }
+
+    // Event management methods
+    async insertEvents(events) {
+        if (!events || events.length === 0) return 0;
+
+        const client = await this.pool.connect();
+        try {
+            let insertedCount = 0;
+
+            const insertQuery = `
+                INSERT INTO energy_events (
+                    country, event_time, event_end_time, event_type, event_category,
+                    title, description, affected_cap, unit_name, source
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            `;
+
+            for (const event of events) {
+                try {
+                    await client.query(insertQuery, [
+                        event.country,
+                        event.event_time,
+                        event.event_end_time || null,
+                        event.event_type,
+                        event.event_category || null,
+                        event.title,
+                        event.description || null,
+                        event.affected_capacity || null,
+                        event.unit_name || null,
+                        event.source || 'ENTSOE'
+                    ]);
+                    insertedCount++;
+                } catch (err) {
+                    // Skip duplicates
+                    if (!err.message.includes('duplicate')) {
+                        console.error('Error inserting event:', err.message);
+                    }
+                }
+            }
+
+            client.release();
+            return insertedCount;
+        } catch (error) {
+            client.release();
+            console.error('❌ Event insertion failed:', error.message);
+            throw error;
+        }
+    }
+
+    async getEventsInRange(startDate, endDate, countries = null) {
+        try {
+            let query = `
+                SELECT * FROM energy_events
+                WHERE event_time >= $1 AND event_time <= $2
+            `;
+            
+            const params = [startDate, endDate];
+            
+            if (countries && countries.length > 0) {
+                query += ` AND country = ANY($3)`;
+                params.push(countries);
+            }
+            
+            query += ` ORDER BY event_time ASC`;
+            
+            const result = await this.pool.query(query, params);
+            return result.rows;
+        } catch (error) {
+            console.error('❌ Event query failed:', error.message);
+            throw error;
+        }
+    }
+
+    async getLatestEventTimestamp() {
+        try {
+            const result = await this.pool.query(
+                'SELECT MAX(event_time) as latest FROM energy_events'
+            );
+            return result.rows[0]?.latest || null;
+        } catch (error) {
+            console.error('❌ Failed to get latest event timestamp:', error.message);
+            return null;
+        }
+    }
+
+    async getEventCount() {
+        try {
+            const result = await this.pool.query('SELECT COUNT(*) FROM energy_events');
+            return parseInt(result.rows[0].count);
+        } catch (error) {
+            console.error('❌ Failed to get event count:', error.message);
+            return 0;
+        }
     }
 }
 

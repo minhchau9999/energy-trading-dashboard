@@ -9,7 +9,7 @@ class EntsoeDataManager {
         this.client = new EntsoeClient(apiKey);
         this.cache = [];
         this.lastFetchTime = null;
-        this.countries = ['PL', 'HU', 'FI']; // Top 3 countries with best data availability
+        this.countries = ['PL', 'HU', 'FI', 'FR', 'NL']; // Top 5 countries with best data availability
         this.isStreaming = false;
         this.currentIndex = 0;
     }
