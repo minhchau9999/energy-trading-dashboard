@@ -1118,7 +1118,7 @@
                 
                 if (nearbyEvents.length === 0) return [];
                 
-                const lines = ['\n━━━ EVENTS ━━━'];
+                const lines = ['\n━━━━━━━━━━━━━━━━━━━'];
                 nearbyEvents.forEach(event => {
                     const eventType = event.event_type;
                     const eventCategory = event.event_category || 'GENERATION';
@@ -1140,19 +1140,34 @@
                     
                     const affectedCapacity = event.affected_cap || event.affected_capacity || 0;
                     const title = event.title || eventType;
+                    const eventTimeStr = new Date(event.event_time).toLocaleTimeString('en-US', { 
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+                    });
                     
-                    lines.push(`${icon} ${title}`);
+                    lines.push(`${icon} ${title.toUpperCase()}`);
+                    lines.push(`   Time: ${eventTimeStr}`);
+                    lines.push(`   Category: ${eventCategory}`);
                     if (affectedCapacity > 0) {
-                        lines.push(`   Capacity: ${Math.round(affectedCapacity)} MW`);
+                        lines.push(`   Affected: ${Math.round(affectedCapacity)} MW`);
                     }
-                    lines.push(`   Type: ${eventCategory}`);
                     if (event.description) {
-                        lines.push(`   ${event.description.substring(0, 40)}...`);
+                        const desc = event.description.length > 50 ? 
+                            event.description.substring(0, 47) + '...' : 
+                            event.description;
+                        lines.push(`   Info: ${desc}`);
                     }
+                    lines.push(''); // Empty line between events
                 });
                 
                 return lines;
             };
+            
+            // Enhance tooltip styling for better event display
+            chart.options.plugins.tooltip.padding = 14;
+            chart.options.plugins.tooltip.bodySpacing = 6;
+            chart.options.plugins.tooltip.titleFont = { size: 13, weight: 'bold' };
+            chart.options.plugins.tooltip.bodyFont = { size: 11 };
+            chart.options.plugins.tooltip.footerFont = { size: 10 };
 
             // Create annotations for each event
             const annotations = {};
@@ -1214,9 +1229,14 @@
                 
                 // Use affected_cap (new column name) instead of affected_capacity
                 const affectedCapacity = event.affected_cap || event.affected_capacity || 0;
-                const labelContent = affectedCapacity > 0 ? 
-                    `${icon} ${Math.round(affectedCapacity)} MW` : 
-                    `${icon} ${(event.title || eventType).substring(0, 20)}`;
+                
+                // Prepare tooltip content
+                const tooltipLines = [
+                    event.title || eventType,
+                    `Category: ${eventCategory}`,
+                    affectedCapacity > 0 ? `Capacity: ${Math.round(affectedCapacity)} MW` : null,
+                    event.description || null
+                ].filter(line => line !== null);
                 
                 annotations[`event_${index}`] = {
                     type: 'line',
@@ -1227,14 +1247,23 @@
                     borderDash: borderDash,
                     label: {
                         display: true,
-                        content: labelContent,
+                        content: icon,
                         position: 'start',
                         backgroundColor: color,
                         color: '#fff',
                         font: {
-                            size: 10
+                            size: 14,
+                            weight: 'bold'
                         },
-                        padding: 4
+                        padding: 4,
+                        rotation: 0
+                    },
+                    // Add enter/leave callbacks for tooltip-like behavior
+                    enter: function(ctx) {
+                        ctx.chart.canvas.style.cursor = 'pointer';
+                    },
+                    leave: function(ctx) {
+                        ctx.chart.canvas.style.cursor = 'default';
                     }
                 };
             });
