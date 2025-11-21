@@ -46,7 +46,8 @@ class EntsoeDataManager {
         // Fetch data in chunks
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
-            console.log(`[${i + 1}/${chunks.length}] Fetching ${chunk.start.toISOString().split('T')[0]} to ${chunk.end.toISOString().split('T')[0]}...`);
+            const progress = Math.round(((i + 1) / chunks.length) * 100);
+            console.log(`[${i + 1}/${chunks.length}] (${progress}%) Fetching ${chunk.start.toISOString().split('T')[0]} to ${chunk.end.toISOString().split('T')[0]}...`);
             
             for (const country of this.countries) {
                 try {

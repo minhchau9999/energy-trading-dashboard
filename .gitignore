@@ -30,6 +30,7 @@ build/
 *.tmp
 *.temp
 temp/
+data-cache.json
 
 # Database (if using local DB)
 *.db

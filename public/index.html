@@ -155,6 +155,35 @@
             flex-shrink: 0;
         }
 
+        .card-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            flex-shrink: 0;
+        }
+
+        .period-selector, .country-selector {
+            padding: 0.4rem 0.8rem;
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            border-radius: 4px;
+            color: #00d4ff;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            flex: 1;
+        }
+
+        .period-selector:hover, .country-selector:hover {
+            background: rgba(0, 212, 255, 0.2);
+            border-color: #00d4ff;
+        }
+
+        .period-selector:focus, .country-selector:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.3);
+        }
+
         .chart-container {
             position: relative;
             flex: 1;
@@ -284,19 +313,147 @@
 
         .trader-qa .question {
             font-style: italic;
-            opacity: 0.8;
+            opacity: 0.9;
             margin-bottom: 0.5rem;
             font-size: 0.85rem;
+            color: #00d4ff;
+            font-weight: 500;
         }
 
         .trader-qa .answer {
-            font-weight: bold;
-            color: #00ffcc;
-            font-size: 0.9rem;
+            color: #e0e0e0;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        
+        #questionInput:focus {
+            outline: none;
+            border-color: #00d4ff;
+            box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.3);
+        }
+        
+        #askButton:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .compact-card {
             grid-row: span 1;
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal.active {
+            display: block;
+        }
+
+        .modal-content {
+            position: relative;
+            background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+            margin: 2% auto;
+            padding: 2rem;
+            width: 95%;
+            height: 90%;
+            border-radius: 12px;
+            border: 2px solid #00d4ff;
+            box-shadow: 0 8px 40px rgba(0, 212, 255, 0.5);
+            animation: slideDown 0.3s ease;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid rgba(0, 212, 255, 0.3);
+        }
+
+        .modal-header h2 {
+            color: #00d4ff;
+            font-size: 1.8rem;
+            font-weight: 400;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .modal-close {
+            background: rgba(255, 71, 87, 0.2);
+            border: 1px solid #ff4757;
+            color: #ff4757;
+            font-size: 1.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-close:hover {
+            background: #ff4757;
+            color: white;
+            transform: scale(1.1);
+        }
+
+        .modal-chart-container {
+            height: calc(100% - 100px);
+            position: relative;
+        }
+
+        .card.clickable {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .card.clickable:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0, 212, 255, 0.4);
+            border-color: #00d4ff;
+        }
+
+        .card.clickable::after {
+            content: "🔍 Click to expand";
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 212, 255, 0.2);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            color: #00d4ff;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .card.clickable:hover::after {
+            opacity: 1;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
 
         @media (max-width: 768px) {
@@ -319,35 +476,13 @@
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1><i class="fas fa-bolt"></i>Energy Trading Dashboard</h1>
-        <div class="controls">
-            <select class="dataset-selector" id="datasetSelector">
-                <option value="time_series_15min_singleindex.csv">15 Min Intervals</option>
-                <option value="time_series_30min_singleindex.csv" selected>30 Min Intervals</option>
-                <option value="time_series_60min_singleindex.csv">60 Min Intervals</option>
-            </select>
-            <button class="btn btn-primary" id="startBtn">
-                <i class="fas fa-play"></i> Start Stream
-            </button>
-            <button class="btn btn-secondary" id="resetBtn">
-                <i class="fas fa-refresh"></i> Reset
-            </button>
-            <button class="btn btn-danger" id="stopBtn" disabled>
-                <i class="fas fa-stop"></i> Stop Stream
-            </button>
-        </div>
-    </div>
 
     <div class="status-bar">
         <div class="status-item">
             <div class="status-indicator" id="statusIndicator"></div>
             <span id="streamStatus">Disconnected</span>
         </div>
-        <div class="status-item">
-            <i class="fas fa-database"></i>
-            <span id="dataProgress">0 / 0 records (0%)</span>
-        </div>
+
         <div class="status-item">
             <i class="fas fa-clock"></i>
             <span id="currentTime">--:--:--</span>
@@ -358,38 +493,61 @@
         <div class="progress-fill" id="progressFill"></div>
     </div>
 
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; background: rgba(0, 0, 0, 0.3); border-bottom: 1px solid rgba(0, 212, 255, 0.3); flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+            <!-- Time Period Selector -->
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="color: #00d4ff; font-weight: 500; font-size: 0.9rem;">
+                    <i class="fas fa-calendar-alt" style="margin-right: 0.5rem;"></i>Time Period:
+                </label>
+                <select class="period-selector" id="globalPeriodSelector" style="min-width: 160px;">
+                    <option value="last-24-hours">Last 24 Hours</option>
+                    <option value="last-48-hours">Last 48 Hours</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="last-7-days" selected>Last 7 Days</option>
+                    <option value="last-30-days">Last 30 Days</option>
+                    <option value="last-90-days">Last 90 Days</option>
+                    <option value="last-6-months">Last 6 Months</option>
+                    <option value="last-year">Last Year</option>
+                </select>
+            </div>
+            
+            <!-- Country Selector -->
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="color: #00d4ff; font-weight: 500; font-size: 0.9rem;">
+                    <i class="fas fa-globe-europe" style="margin-right: 0.5rem;"></i>Country:
+                </label>
+                <select class="country-selector" id="globalCountrySelector" style="min-width: 140px;">
+                    <option value="PL">🇵🇱 Poland</option>
+                    <option value="HU">🇭🇺 Hungary</option>
+                    <option value="FI">🇫🇮 Finland</option>
+                </select>
+            </div>
+        </div>
+        
+        <div id="periodInfo" style="color: #00d4ff; font-size: 0.85rem; opacity: 0.9;">
+            <i class="fas fa-info-circle" style="margin-right: 0.5rem;"></i>
+            <span id="periodInfoText">Resolution: 1 hour | Data points: ~188</span>
+        </div>
+    </div>
+
     <div class="dashboard">
-        <div class="card">
+        <div class="card clickable" data-chart="load">
             <h3><i class="fas fa-chart-line"></i>Load vs Forecast</h3>
-            <select class="country-selector" id="loadCountrySelector">
-                <option value="PL">Poland (PL)</option>
-                <option value="HU">Hungary (HU)</option>
-                <option value="FI">Finland (FI)</option>
-            </select>
             <div class="chart-container">
                 <canvas id="loadChart"></canvas>
             </div>
         </div>
 
-        <div class="card">
+        <div class="card clickable" data-chart="price">
             <h3><i class="fas fa-euro-sign"></i>Day-Ahead Prices</h3>
-            <select class="country-selector" id="priceCountrySelector">
-                <option value="PL">Poland (PL)</option>
-                <option value="HU">Hungary (HU)</option>
-                <option value="FI">Finland (FI)</option>
-            </select>
             <div class="chart-container">
                 <canvas id="priceChart"></canvas>
             </div>
         </div>
 
-        <div class="card">
+        <div class="card clickable" data-chart="renewable">
             <h3><i class="fas fa-wind"></i>Renewable Generation</h3>
-            <select class="country-selector" id="renewableCountrySelector">
-                <option value="PL">Poland (PL)</option>
-                <option value="HU">Hungary (HU)</option>
-                <option value="FI">Finland (FI)</option>
-            </select>
             <div class="chart-container">
                 <canvas id="renewableChart"></canvas>
             </div>
@@ -425,10 +583,70 @@
         </div>
 
         <div class="card compact-card trader-qa">
-            <h3><i class="fas fa-lightbulb"></i> Trader Insights</h3>
-            <div id="qaSection">
-                <p class="question">What's the current market sentiment?</p>
-                <p class="answer">Awaiting new data to determine market direction. Stand by for updates.</p>
+            <h3><i class="fas fa-lightbulb"></i> AI Trading Advisor</h3>
+            
+            <!-- Question Input with Datalist for suggestions -->
+            <div style="margin-bottom: 0.75rem;">
+                <input 
+                    list="predefinedQuestions" 
+                    id="questionInput" 
+                    type="text" 
+                    placeholder="Type your question or select from dropdown..."
+                    style="width: 100%; padding: 0.5rem; background: rgba(0, 212, 255, 0.1); border: 1px solid rgba(0, 212, 255, 0.3); border-radius: 4px; color: #e0e0e0; font-size: 0.85rem;"
+                />
+                <datalist id="predefinedQuestions">
+                    <option value="What's driving price volatility in the Polish market today?"></option>
+                    <option value="Is there an arbitrage opportunity between Poland and Finland?"></option>
+                    <option value="How accurate are the wind forecasts for Finland this week?"></option>
+                    <option value="Should we adjust our position based on Hungarian load forecast deviation?"></option>
+                    <option value="What's the renewable energy outlook for Poland?"></option>
+                    <option value="How is the Polish coal fleet responding to demand spikes?"></option>
+                    <option value="What's the biggest risk in the Nordic market right now?"></option>
+                    <option value="Are Hungarian day-ahead prices following the regional trend?"></option>
+                    <option value="What's the cross-border flow pattern between PL and neighboring markets?"></option>
+                    <option value="How should we position for the weekend load drop?"></option>
+                    <option value="Is the Finnish market pricing in the forecasted temperature drop?"></option>
+                    <option value="What's the impact of EU carbon prices on Central European markets?"></option>
+                    <option value="Should we be concerned about grid congestion in Hungary?"></option>
+                    <option value="What's the solar capacity factor looking like for Poland this month?"></option>
+                    <option value="How reliable is the load forecast during holiday periods?"></option>
+                </datalist>
+            </div>
+            
+            <!-- Ask Button -->
+            <button 
+                id="askButton" 
+                class="btn btn-primary" 
+                onclick="askAIInsight()"
+                style="width: 100%; margin-bottom: 0.75rem; padding: 0.5rem; font-size: 0.85rem;"
+            >
+                <i class="fas fa-robot"></i> Ask AI
+            </button>
+            
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" style="display: none; text-align: center; margin-bottom: 0.75rem; color: #00d4ff; font-size: 0.85rem;">
+                <i class="fas fa-spinner fa-spin"></i> AI is thinking...
+            </div>
+            
+            <!-- Answer Section -->
+            <div id="qaSection" style="background: rgba(0, 212, 255, 0.05); padding: 0.75rem; border-radius: 4px; border: 1px solid rgba(0, 212, 255, 0.2);">
+                <p class="question" id="displayQuestion" style="margin-bottom: 0.5rem;">Ask a question to get AI-powered trading insights!</p>
+                <p class="answer" id="displayAnswer">Select a question from the dropdown or type your own, then click "Ask AI".</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for expanded chart view -->
+    <div id="chartModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle"><i class="fas fa-chart-line"></i> Chart Details</h2>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-chart-container">
+                <canvas id="modalChart"></canvas>
             </div>
         </div>
     </div>
@@ -537,15 +755,15 @@
             }
         });
 
+        // Modal chart
+        let modalChartInstance = null;
+
         // Data storage
         let currentData = null;
         let dataHistory = [];
         const maxDataPoints = 50;
 
         // UI Elements
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const resetBtn = document.getElementById('resetBtn');
         const datasetSelector = document.getElementById('datasetSelector');
         const statusIndicator = document.getElementById('statusIndicator');
         const streamStatus = document.getElementById('streamStatus');
@@ -555,39 +773,99 @@
         const newsList = document.getElementById('newsList');
         const qaSection = document.getElementById('qaSection');
 
-        // Country selectors
-        const loadCountrySelector = document.getElementById('loadCountrySelector');
-        const priceCountrySelector = document.getElementById('priceCountrySelector');
-        const renewableCountrySelector = document.getElementById('renewableCountrySelector');
+        // Global selectors
+        const globalPeriodSelector = document.getElementById('globalPeriodSelector');
+        const globalCountrySelector = document.getElementById('globalCountrySelector');
+        const periodInfoText = document.getElementById('periodInfoText');
 
-        // Button event listeners
-        startBtn.addEventListener('click', () => {
-            socket.emit('startStream', { interval: 2000 });
+        // Period info mapping
+        const periodInfoMap = {
+            'last-24-hours': { resolution: '15 minutes', points: '~96' },
+            'last-48-hours': { resolution: '15 minutes', points: '~192' },
+            'yesterday': { resolution: '15 minutes', points: '~96' },
+            'last-7-days': { resolution: '1 hour', points: '~168' },
+            'last-30-days': { resolution: '4 hours', points: '~180' },
+            'last-90-days': { resolution: '1 day', points: '~90' },
+            'last-6-months': { resolution: '1 day', points: '~180' },
+            'last-year': { resolution: '1 day', points: '~365' }
+        };
+
+        // Update period info display
+        function updatePeriodInfo() {
+            const period = globalPeriodSelector.value;
+            const info = periodInfoMap[period];
+            if (info) {
+                periodInfoText.textContent = `Resolution: ${info.resolution} | Expected: ${info.points} points`;
+            }
+        }
+
+        // Global selector listeners
+        globalCountrySelector.addEventListener('change', updateCharts);
+        
+        // Period selector listeners
+        // Fetch data on-demand from API based on selected period
+        async function fetchData() {
+            try {
+                streamStatus.textContent = 'Loading...';
+                
+                // Get the selected period from global selector
+                const period = globalPeriodSelector.value;
+                
+                // Fetch data for the selected period
+                const response = await fetch(`/api/data/period?period=${period}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    dataHistory = result.data;
+                    
+                    // Update period info with actual loaded data
+                    const info = periodInfoMap[period];
+                    let resolution = result.aggregation === 'none' ? '15 minutes' : 
+                                   result.aggregation === '1 hour' ? '1 hour' :
+                                   result.aggregation === '4 hours' ? '4 hours' : '1 day';
+                    periodInfoText.textContent = `Resolution: ${resolution} | Loaded: ${result.dataPoints} points`;
+                    
+                    // Show status
+                    let statusText = `Loaded ${result.dataPoints} points`;
+                    if (result.aggregation && result.aggregation !== 'none') {
+                        statusText += ` (${result.aggregation} avg)`;
+                    }
+                    streamStatus.textContent = statusText;
+                    statusIndicator.classList.add('streaming');
+                    
+                    // Update UI with latest data point
+                    if (dataHistory.length > 0) {
+                        currentData = dataHistory[dataHistory.length - 1];
+                        const date = new Date(currentData.timestamp);
+                        currentTime.textContent = date.toLocaleString();
+                    }
+                    
+                    updateCharts();
+                    updateMetrics();
+                } else {
+                    streamStatus.textContent = 'Error loading data';
+                    console.error('Failed to fetch data:', result.error);
+                }
+            } catch (error) {
+                streamStatus.textContent = 'Error';
+                console.error('Error fetching data:', error);
+            }
+        }
+
+        // Re-fetch data when period changes, update charts when country changes
+        globalPeriodSelector.addEventListener('change', () => {
+            updatePeriodInfo();
+            fetchData();
         });
 
-        stopBtn.addEventListener('click', () => {
-            socket.emit('stopStream');
-        });
-
-        resetBtn.addEventListener('click', () => {
-            socket.emit('resetStream');
-            dataHistory = [];
-            updateCharts();
-        });
-
-        datasetSelector.addEventListener('change', (e) => {
-            socket.emit('changeDataset', { dataset: e.target.value });
-        });
-
-        // Country selector listeners
-        loadCountrySelector.addEventListener('change', updateCharts);
-        priceCountrySelector.addEventListener('change', updateCharts);
-        renewableCountrySelector.addEventListener('change', updateCharts);
+        // Initialize period info
+        updatePeriodInfo();
 
         // Socket event listeners
         socket.on('connect', () => {
             streamStatus.textContent = 'Connected';
             statusIndicator.classList.add('streaming');
+            fetchData(); // Load data on connect
         });
 
         socket.on('disconnect', () => {
@@ -595,31 +873,13 @@
             statusIndicator.classList.remove('streaming');
         });
 
-        socket.on('energyData', (data) => {
-            currentData = data;
-            dataHistory.push(data);
-            
-            // Keep only recent data points
-            if (dataHistory.length > maxDataPoints) {
-                dataHistory.shift();
-            }
-            
-            updateUI(data);
-            updateCharts();
-            updateMetrics();
-        });
-
         socket.on('streamStatus', (data) => {
             if (data.isStreaming) {
                 streamStatus.textContent = 'Streaming';
                 statusIndicator.classList.add('streaming');
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
             } else {
                 streamStatus.textContent = 'Stopped';
                 statusIndicator.classList.remove('streaming');
-                startBtn.disabled = false;
-                stopBtn.disabled = true;
             }
         });
 
@@ -658,57 +918,97 @@
         });
 
         socket.on('traderInsight', (insight) => {
-            qaSection.innerHTML = `
-                <p class="question">${insight.question}</p>
-                <p class="answer">${insight.answer}</p>
-            `;
+            // Update the display with the AI response
+            document.getElementById('displayQuestion').textContent = insight.question;
+            document.getElementById('displayAnswer').textContent = insight.answer;
+            
+            // Hide loading indicator
+            document.getElementById('loadingIndicator').style.display = 'none';
+            document.getElementById('askButton').disabled = false;
         });
 
-        // Update UI functions
-        function updateUI(data) {
-            dataProgress.textContent = `${data.index} / ${data.total} records (${data.progress}%)`;
-            progressFill.style.width = data.progress + '%';
+        // Function to ask AI for insights on demand
+        async function askAIInsight() {
+            const questionInput = document.getElementById('questionInput');
+            const question = questionInput.value.trim();
             
-            if (data.cetTimestamp) {
-                const date = new Date(data.cetTimestamp);
-                currentTime.textContent = date.toLocaleString();
+            if (!question) {
+                alert('Please enter a question!');
+                return;
             }
+            
+            // Show loading state
+            document.getElementById('loadingIndicator').style.display = 'block';
+            document.getElementById('askButton').disabled = true;
+            document.getElementById('displayQuestion').textContent = question;
+            document.getElementById('displayAnswer').textContent = 'Processing your question...';
+            
+            // Emit the question to the server
+            socket.emit('askInsight', { question: question });
         }
+        
+        // Allow pressing Enter in the input to submit
+        document.addEventListener('DOMContentLoaded', () => {
+            const questionInput = document.getElementById('questionInput');
+            if (questionInput) {
+                questionInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        askAIInsight();
+                    }
+                });
+            }
+        });
 
         function updateCharts() {
             if (dataHistory.length === 0) return;
 
-            const selectedLoadCountry = loadCountrySelector.value;
-            const selectedPriceCountry = priceCountrySelector.value;
-            const selectedRenewableCountry = renewableCountrySelector.value;
+            // Use global country selector for all charts
+            const selectedCountry = globalCountrySelector.value;
+
+            // Use all data from API (already filtered by period and aggregated)
+            const chartData = dataHistory;
+
+            // Determine point styling based on data size
+            const pointRadius = chartData.length > 500 ? 0 : (chartData.length > 200 ? 1 : 3);
+            const lineWidth = chartData.length > 1000 ? 1 : 2;
 
             // Update load chart
-            loadChart.data.datasets[0].data = dataHistory.map(d => ({
+            loadChart.data.datasets[0].data = chartData.map(d => ({
                 x: new Date(d.timestamp),
-                y: d.countries[selectedLoadCountry]?.load_actual
+                y: d.countries[selectedCountry]?.load_actual
             })).filter(point => point.y !== null);
+            loadChart.data.datasets[0].pointRadius = pointRadius;
+            loadChart.data.datasets[0].borderWidth = lineWidth;
 
-            loadChart.data.datasets[1].data = dataHistory.map(d => ({
+            loadChart.data.datasets[1].data = chartData.map(d => ({
                 x: new Date(d.timestamp),
-                y: d.countries[selectedLoadCountry]?.load_forecast
+                y: d.countries[selectedCountry]?.load_forecast
             })).filter(point => point.y !== null);
+            loadChart.data.datasets[1].pointRadius = pointRadius;
+            loadChart.data.datasets[1].borderWidth = lineWidth;
 
             // Update price chart
-            priceChart.data.datasets[0].data = dataHistory.map(d => ({
+            priceChart.data.datasets[0].data = chartData.map(d => ({
                 x: new Date(d.timestamp),
-                y: d.countries[selectedPriceCountry]?.price_day_ahead
+                y: d.countries[selectedCountry]?.price_day_ahead
             })).filter(point => point.y !== null);
+            priceChart.data.datasets[0].pointRadius = pointRadius;
+            priceChart.data.datasets[0].borderWidth = lineWidth;
 
             // Update renewable chart
-            renewableChart.data.datasets[0].data = dataHistory.map(d => ({
+            renewableChart.data.datasets[0].data = chartData.map(d => ({
                 x: new Date(d.timestamp),
-                y: d.countries[selectedRenewableCountry]?.solar_generation
+                y: d.countries[selectedCountry]?.solar_generation
             })).filter(point => point.y !== null);
+            renewableChart.data.datasets[0].pointRadius = pointRadius;
+            renewableChart.data.datasets[0].borderWidth = lineWidth;
 
-            renewableChart.data.datasets[1].data = dataHistory.map(d => ({
+            renewableChart.data.datasets[1].data = chartData.map(d => ({
                 x: new Date(d.timestamp),
-                y: d.countries[selectedRenewableCountry]?.wind_generation
+                y: d.countries[selectedCountry]?.wind_generation
             })).filter(point => point.y !== null);
+            renewableChart.data.datasets[1].pointRadius = pointRadius;
+            renewableChart.data.datasets[1].borderWidth = lineWidth;
 
             // Update all charts
             loadChart.update('none');
@@ -775,6 +1075,220 @@
                 statusIndicator.classList.remove('streaming');
             }
         }, 5000);
+
+        // Modal functionality
+        const modal = document.getElementById('chartModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalChartCanvas = document.getElementById('modalChart');
+
+        // Add click listeners to chart cards
+        document.querySelectorAll('.card.clickable').forEach(card => {
+            card.addEventListener('click', function(e) {
+                // Don't open modal if clicking on selectors
+                if (e.target.tagName === 'SELECT' || e.target.closest('.card-controls')) {
+                    return;
+                }
+                
+                const chartType = this.getAttribute('data-chart');
+                openModal(chartType);
+            });
+        });
+
+        function openModal(chartType) {
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            
+            // Destroy existing modal chart if it exists
+            if (modalChartInstance) {
+                modalChartInstance.destroy();
+            }
+            
+            // Configure modal based on chart type
+            let title, icon, datasets, yAxisLabel;
+            // Use global country selector for modal charts
+            const selectedCountry = globalCountrySelector.value;
+            
+            const chartData = dataHistory;
+            const pointRadius = chartData.length > 500 ? 0 : (chartData.length > 200 ? 1 : 3);
+            const lineWidth = chartData.length > 1000 ? 1 : 2;
+            
+            if (chartType === 'load') {
+                title = 'Load vs Forecast - ' + selectedCountry;
+                icon = 'fa-chart-line';
+                yAxisLabel = 'Load (MW)';
+                datasets = [
+                    {
+                        label: 'Actual Load',
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        data: chartData.map(d => ({
+                            x: new Date(d.timestamp),
+                            y: d.countries[selectedCountry]?.load_actual
+                        })).filter(point => point.y !== null),
+                        pointRadius: pointRadius,
+                        borderWidth: lineWidth,
+                        fill: true
+                    },
+                    {
+                        label: 'Forecast Load',
+                        borderColor: '#00ffcc',
+                        backgroundColor: 'rgba(0, 255, 204, 0.1)',
+                        borderDash: [5, 5],
+                        data: chartData.map(d => ({
+                            x: new Date(d.timestamp),
+                            y: d.countries[selectedCountry]?.load_forecast
+                        })).filter(point => point.y !== null),
+                        pointRadius: pointRadius,
+                        borderWidth: lineWidth,
+                        fill: true
+                    }
+                ];
+            } else if (chartType === 'price') {
+                title = 'Day-Ahead Prices - ' + selectedCountry;
+                icon = 'fa-euro-sign';
+                yAxisLabel = 'Price (€/MWh)';
+                datasets = [{
+                    label: 'Day-Ahead Price',
+                    borderColor: '#ff6b6b',
+                    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                    data: chartData.map(d => ({
+                        x: new Date(d.timestamp),
+                        y: d.countries[selectedCountry]?.price_day_ahead
+                    })).filter(point => point.y !== null),
+                    pointRadius: pointRadius,
+                    borderWidth: lineWidth,
+                    fill: true
+                }];
+            } else if (chartType === 'renewable') {
+                title = 'Renewable Generation - ' + selectedCountry;
+                icon = 'fa-wind';
+                yAxisLabel = 'Generation (MW)';
+                datasets = [
+                    {
+                        label: 'Solar Generation',
+                        borderColor: '#ffd93d',
+                        backgroundColor: 'rgba(255, 217, 61, 0.1)',
+                        data: chartData.map(d => ({
+                            x: new Date(d.timestamp),
+                            y: d.countries[selectedCountry]?.solar_generation
+                        })).filter(point => point.y !== null),
+                        pointRadius: pointRadius,
+                        borderWidth: lineWidth,
+                        fill: true
+                    },
+                    {
+                        label: 'Wind Generation',
+                        borderColor: '#6bcf7f',
+                        backgroundColor: 'rgba(107, 207, 127, 0.1)',
+                        data: chartData.map(d => ({
+                            x: new Date(d.timestamp),
+                            y: d.countries[selectedCountry]?.wind_generation
+                        })).filter(point => point.y !== null),
+                        pointRadius: pointRadius,
+                        borderWidth: lineWidth,
+                        fill: true
+                    }
+                ];
+            }
+            
+            modalTitle.innerHTML = `<i class="fas ${icon}"></i> ${title}`;
+            
+            // Create modal chart with enhanced options
+            modalChartInstance = new Chart(modalChartCanvas, {
+                type: 'line',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: 'white',
+                                font: { size: 14 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#00d4ff',
+                            bodyColor: '#ffffff',
+                            borderColor: '#00d4ff',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                displayFormats: {
+                                    hour: 'MMM dd HH:mm',
+                                    day: 'MMM dd',
+                                    minute: 'HH:mm'
+                                }
+                            },
+                            ticks: {
+                                color: 'white',
+                                font: { size: 12 }
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time',
+                                color: '#00d4ff',
+                                font: { size: 14 }
+                            }
+                        },
+                        y: {
+                            ticks: {
+                                color: 'white',
+                                font: { size: 12 }
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            title: {
+                                display: true,
+                                text: yAxisLabel,
+                                color: '#00d4ff',
+                                font: { size: 14 }
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+        }
+
+        function closeModal() {
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+            
+            if (modalChartInstance) {
+                modalChartInstance.destroy();
+                modalChartInstance = null;
+            }
+        }
+
+        // Close modal when clicking outside
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                closeModal();
+            }
+        });
     </script>
 </body>
 </html>

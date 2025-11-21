@@ -17,12 +17,15 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@langchain/community": "^1.0.4",
     "axios": "^1.13.2",
     "csv-parse": "^6.1.0",
     "csv-parser": "^3.2.0",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "langchain": "^1.0.6",
+    "ollama": "^0.6.3",
     "openai": "^6.7.0",
     "pg": "^8.16.3",
     "redis": "^4.6.0",

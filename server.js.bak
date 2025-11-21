@@ -12,7 +12,6 @@ const TradingMetrics = require('./utils/tradingMetrics');
 const DatabaseManager = require('./utils/databaseManager');
 const EntsoeClient = require('./utils/entsoeClient');
 const EntsoeDataManager = require('./utils/entsoeDataManager');
-const AIInsightsService = require('./utils/aiInsightsService');
 
 const app = express();
 const server = http.createServer(app);
@@ -54,9 +53,6 @@ const entsoeClient = ENTSOE_API_KEY && ENTSOE_API_KEY !== 'YOUR_API_KEY_HERE'
     ? new EntsoeClient(ENTSOE_API_KEY) 
     : null;
 
-// Initialize AI Insights Service
-let aiInsightsService = null;
-
 // Initialize ENTSO-E live data manager
 const entsoeDataManager = ENTSOE_API_KEY && ENTSOE_API_KEY !== 'YOUR_API_KEY_HERE'
     ? new EntsoeDataManager(ENTSOE_API_KEY)
@@ -70,23 +66,13 @@ let dataSource = 'unknown'; // 'entsoe-live', 'database', or 'csv'
 let newsCache = [];
 let lastReutersFetch = null;
 
-// Mock data for insights - Energy Trading Q&A
+// Mock data for insights
 const traderInsights = [
-    { question: "What's driving price volatility in the Polish market today?", answer: "Coal generation outages combined with low wind output are pushing prices higher. Consider hedging exposure during evening peak hours." },
-    { question: "Is there an arbitrage opportunity between Poland and Finland?", answer: "Yes, significant spread detected. Finnish prices are 15-20% lower due to abundant hydro. Monitor interconnector capacity utilization." },
-    { question: "How accurate are the wind forecasts for Finland this week?", answer: "High confidence - weather models show consistent patterns. Expect strong wind generation to suppress day-ahead prices through Friday." },
-    { question: "Should we adjust our position based on Hungarian load forecast deviation?", answer: "Load is tracking 8% above forecast due to cold snap. Consider reducing short positions and watch for grid stress warnings." },
-    { question: "What's the renewable energy outlook for Poland?", answer: "Solar generation ramping up with clear skies expected. Wind farms at 60% capacity. Net renewable share could hit 25% by afternoon." },
-    { question: "How is the Polish coal fleet responding to demand spikes?", answer: "Slow ramp rates creating intraday volatility. Consider trading the morning/evening transitions when flexibility is most valuable." },
-    { question: "What's the biggest risk in the Nordic market right now?", answer: "Hydro reservoir levels are below seasonal average. Any prolonged dry spell could trigger sharp price increases across Finland and neighbors." },
-    { question: "Are Hungarian day-ahead prices following the regional trend?", answer: "Partially decoupled - domestic nuclear output is stable, providing price floor. Watch for convergence during high-demand periods." },
-    { question: "What's the cross-border flow pattern between PL and neighboring markets?", answer: "Net importer position today. German excess renewables flowing eastward, keeping Polish prices in check. This could reverse tonight." },
-    { question: "How should we position for the weekend load drop?", answer: "Industrial demand falls 30-40% on weekends. Renewable oversupply likely - consider shorting day-ahead or buying low for Monday delivery." },
-    { question: "Is the Finnish market pricing in the forecasted temperature drop?", answer: "Not fully. Current forward curve looks flat, but 5°C drop expected next week could add 500-700 MW load. Opportunity for long positions." },
-    { question: "What's the impact of EU carbon prices on Central European markets?", answer: "EUA trading at multi-year highs - increasing coal generation costs in PL and HU. Clean spark spreads favor gas, watch for fuel switching." },
-    { question: "Should we be concerned about grid congestion in Hungary?", answer: "Southern interconnector is near thermal limits. Any additional flows could trigger market splitting and locational price divergence." },
-    { question: "What's the solar capacity factor looking like for Poland this month?", answer: "Below average at 12-14% due to persistent cloud cover. Don't expect significant solar contribution until weather pattern shifts." },
-    { question: "How reliable is the load forecast during holiday periods?", answer: "Historical accuracy drops 15-20% during holidays. Use wider confidence intervals and consider scenario-based hedging strategies." }
+    { question: "What's the short-term price outlook for the IE market?", answer: "High wind generation is putting downward pressure on prices, but watch for evening demand spikes." },
+    { question: "Is there an arbitrage opportunity between GB and IE?", answer: "Currently minimal. Interconnector is near capacity and price differential is low." },
+    { question: "How reliable are the solar forecasts for GB?", answer: "Partly cloudy conditions are making forecasts less certain. Expect some deviation from actuals." },
+    { question: "Should we be concerned about the load forecast accuracy in CY?", answer: "It's within normal parameters, but tourist season is causing some unusual demand patterns." },
+    { question: "What's the biggest risk factor right now?", answer: "Unplanned generator outages. Keep an eye on real-time generation data." }
 ];
 
 // Fetch Energy News RSS feed
@@ -316,79 +302,40 @@ async function initializeData() {
             console.log('�📡 Fetching historical + live data from ENTSO-E...');
             console.log('⏳ This will take several minutes for 1 year of data...\n');
             
-            // Use TimescaleDB for persistent storage
-            console.log('Connecting to TimescaleDB...');
-            const dbConnected = await dbManager.testConnection();
+            // Fetch 1 year (365 days) of historical data
+            dbData = await entsoeDataManager.fetchHistoricalData(365);
             
-            if (!dbConnected) {
-                throw new Error('Cannot connect to TimescaleDB');
-            }
-
-            await dbManager.initializeSchema();
-
-            const dbCount = await dbManager.getDataCount();
-            const latestTimestamp = await dbManager.getLatestTimestamp();
-            
-            console.log(`Database contains ${dbCount} records`);
-            if (latestTimestamp) {
-                console.log(`Latest data: ${latestTimestamp}`);
-            }
-
-            const needsFetch = dbCount === 0;
-            const isStale = latestTimestamp && (new Date() - new Date(latestTimestamp)) > (24 * 60 * 60 * 1000);
-
-            if (needsFetch) {
-                console.log('\n========================================');
-                console.log('📡 INITIAL DATA FETCH - 1 YEAR');
-                console.log('========================================');
-                console.log('⏳ This will take 5-10 minutes...');
-                console.log('   Progress will be shown below:\n');
-                
-                const startTime = Date.now();
-                const fetchedData = await entsoeDataManager.fetchHistoricalData(365);
-                const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
-                
-                if (fetchedData.length > 0) {
-                    console.log(`\n========================================`);
-                    console.log(`✅ FETCH COMPLETE in ${elapsed} minutes`);
-                    console.log(`📊 Fetched ${fetchedData.length} data points`);
-                    console.log(`========================================\n`);
-                    
-                    console.log(`💾 Saving to TimescaleDB...`);
-                    const saveStartTime = Date.now();
-                    await dbManager.insertData(fetchedData);
-                    const saveElapsed = ((Date.now() - saveStartTime) / 1000).toFixed(1);
-                    console.log(`✅ Saved ${fetchedData.length} records in ${saveElapsed}s\n`);
+            if (dbData.length > 0) {
+                currentIndex = 0;
+                dataSource = 'entsoe-historical';
+                console.log('✅ ENTSO-E data initialized successfully');
+                const cacheInfo = entsoeDataManager.getCacheInfo();
+                if (cacheInfo.dateRange.start) {
+                    console.log(`📅 Data range: ${cacheInfo.dateRange.start} to ${cacheInfo.dateRange.end}`);
+                    console.log(`📊 Total data points: ${cacheInfo.dataPoints}\n`);
                 }
-            } else if (isStale) {
-                console.log('Fetching latest updates...');
-                const daysSince = Math.ceil((new Date() - new Date(latestTimestamp)) / (24 * 60 * 60 * 1000));
-                const freshData = await entsoeDataManager.fetchHistoricalData(daysSince + 1);
                 
-                if (freshData.length > 0) {
-                    await dbManager.insertData(freshData);
-                    console.log('Database updated');
+                // Save to cache for next startup
+                try {
+                    console.log('💾 Saving data to cache for faster next startup...');
+                    const cacheData = {
+                        timestamp: Date.now(),
+                        data: dbData,
+                        countries: ['PL', 'HU', 'FI'],
+                        dataPoints: dbData.length
+                    };
+                    fs.writeFileSync(cacheFile, JSON.stringify(cacheData), 'utf8');
+                    console.log('✅ Cache saved successfully\n');
+                } catch (cacheError) {
+                    console.log('⚠️  Failed to save cache, will fetch fresh data on next startup');
                 }
+                
+                // Start background refresh for real-time updates
+                startRealtimeDataRefresh();
+                return;
+            } else {
+                throw new Error('ENTSO-E returned 0 data points');
             }
-
-            console.log('Loading data from database...');
-            dbData = await dbManager.getAllData();
-            currentIndex = 0;
-            dataSource = 'timescaledb';
-            
-            console.log(`Loaded ${dbData.length} records`);
-            
-            // Initialize AI Insights Service
-            if (!aiInsightsService) {
-                console.log('🤖 Initializing AI Insights Service...');
-                aiInsightsService = new AIInsightsService(dbManager);
-                await aiInsightsService.buildMarketContext();
-                const status = aiInsightsService.getStatus();
-                console.log(`✅ AI Insights Service ready (Model: ${status.model}, Enabled: ${status.enabled})`);
-            }
-            
-            startRealtimeDataRefresh();
-            return;
         } catch (entsoeError) {
             console.error('❌ ENTSO-E data fetch failed:', entsoeError.message);
             throw entsoeError;
@@ -416,15 +363,19 @@ function startRealtimeDataRefresh() {
             const freshData = await entsoeDataManager.fetchLiveData(2);
             
             if (freshData.length > 0) {
-                // Save new data to database
-                await dbManager.insertData(freshData);
-                console.log(`Saved ${freshData.length} new records to database`);
+                // Merge with existing historical data
+                const existingData = entsoeDataManager.getAllData();
                 
-                // Reload all data from database
-                dbData = await dbManager.getAllData();
+                // Find the cutoff point (remove overlapping old data)
+                const cutoffTime = freshData[0].timestamp;
+                const filteredOldData = existingData.filter(point => point.timestamp < cutoffTime);
                 
-                console.log(`Real-time data refreshed`);
-                console.log(`Total data points: ${dbData.length}`);
+                // Combine old + new
+                dbData = [...filteredOldData, ...freshData];
+                entsoeDataManager.cache = dbData;
+                
+                console.log(`✅ Real-time data refreshed: ${freshData.length} new points added`);
+                console.log(`📊 Total data points: ${dbData.length}\n`);
             }
         } catch (error) {
             console.error('⚠️  Real-time refresh failed:', error.message);
@@ -458,11 +409,8 @@ function getCurrentDataPoint() {
     while (attempts < 100) { // Prevent infinite loop
         const record = dbData[currentIndex];
         
-        // Check if this record has some actual data (not all null) - check both new and legacy fields
-        if (record.pl_load_actual !== null || 
-            record.hu_load_actual !== null || 
-            record.fi_load_actual !== null ||
-            record.cy_load_actual !== null || 
+        // Check if this record has some actual data (not all null)
+        if (record.cy_load_actual !== null || 
             record.gb_gbn_load_actual !== null || 
             record.ie_load_actual !== null ||
             record.ie_sem_price_day_ahead !== null) {
@@ -637,12 +585,12 @@ function startStreaming(intervalMs = 2000) {
     streamingInterval = setInterval(async () => {
         try {
             // Get current total record count
-            const countResult = await dbManager.pool.query('SELECT COUNT(*) FROM energy_data');
+            const countResult = await dbManager.pool.query('SELECT COUNT(*) FROM energy_trading_30min');
             const totalRecords = parseInt(countResult.rows[0].count);
             
             // Query records with offset for progression
             const query = `
-                SELECT * FROM energy_data 
+                SELECT * FROM energy_trading_30min 
                 ORDER BY timestamp ASC 
                 LIMIT 1 OFFSET $1
             `;
@@ -679,30 +627,27 @@ function startStreaming(intervalMs = 2000) {
             io.emit('energyData', enhancedData);
             
             // Periodically send news and insights
-            if (currentIndex % 15 === 0 && newsCache.length > 0) { // Every 15 data points
-                const news = newsCache[Math.floor(Math.random() * newsCache.length)];
+            if (currentIndex % 15 === 0) { // Every 15 data points
+                const news = marketNews[Math.floor(Math.random() * marketNews.length)];
                 io.emit('marketNews', news);
             }
-            // Note: AI insights are now on-demand only (removed automatic generation)
+            if (currentIndex % 25 === 0) { // Every 25 data points
+                const insight = traderInsights[Math.floor(Math.random() * traderInsights.length)];
+                io.emit('traderInsight', insight);
+            }
             
             currentIndex++;
             
             // Debug: Log renewable and price data for troubleshooting
             if (currentIndex % 10 === 0) { // Every 10th record
                 console.log(`\n🔍 DEBUG Record ${currentIndex}:`);
-                console.log(`  PL data:`, {
-                    load: processedData.countries.PL?.load_actual,
-                    price: processedData.countries.PL?.price_day_ahead,
-                    wind: processedData.countries.PL?.wind_generation,
-                    solar: processedData.countries.PL?.solar_generation
+                console.log(`  Renewable data:`, {
+                    gb_total_wind: processedData.countries.GB?.total_wind,
+                    ie_total_wind: processedData.countries.IE?.total_wind,
+                    cy_wind: processedData.countries.CY?.wind_onshore
                 });
-                console.log(`  HU data:`, {
-                    load: processedData.countries.HU?.load_actual,
-                    price: processedData.countries.HU?.price_day_ahead
-                });
-                console.log(`  FI data:`, {
-                    load: processedData.countries.FI?.load_actual,
-                    price: processedData.countries.FI?.price_day_ahead
+                console.log(`  Price data:`, {
+                    ie_sem_price: processedData.countries.IE?.sem_price_day_ahead
                 });
                 console.log(`  Timestamp:`, processedData.timestamp);
             }
@@ -739,60 +684,85 @@ function stopStreaming() {
     console.log('Data streaming stopped');
 }
 
-// Socket.IO connection handling - Simplified (no streaming, data fetched via API)
+// Socket.IO connection handling
 io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
+    try {
+        console.log('Client connected:', socket.id);
     
     // Send current status to new client
     socket.emit('status', {
-        dataSource,
-        totalRecords: dbData.length
+        isStreaming,
+        currentIndex,
+        totalRecords: dbData.length,
+        selectedDataset,
+        dataSource
     });
     
-    // Handle real-time news updates
-    socket.on('requestNews', () => {
-        if (newsCache.length > 0) {
-            socket.emit('newsUpdate', newsCache);
-        }
+    // Send latest data point to new client
+    if (dbData.length > 0) {
+        const currentData = processDataPoint(getCurrentDataPoint());
+        socket.emit('energyData', {
+            ...currentData,
+            index: currentIndex,
+            total: dbData.length,
+            progress: ((currentIndex / dbData.length) * 100).toFixed(2)
+        });
+    }
+    
+    // Handle client commands
+    socket.on('startStream', (data) => {
+        const interval = data?.interval || 2000;
+        startStreaming(interval);
+        io.emit('streamStatus', { isStreaming: true });
     });
     
-    // Handle AI insight requests
-    socket.on('askInsight', async (data) => {
-        console.log(`📝 AI Insight requested: "${data.question}"`);
+    socket.on('stopStream', () => {
+        stopStreaming();
+        io.emit('streamStatus', { isStreaming: false });
+    });
+    
+    socket.on('resetStream', () => {
+        currentIndex = 0;
+        console.log('Stream reset to beginning');
+        io.emit('streamReset', { currentIndex: 0 });
+    });
+    
+    socket.on('changeDataset', async (data) => {
+        const { dataset } = data;
+        const validDatasets = [
+            'time_series_15min_singleindex.csv',
+            'time_series_30min_singleindex.csv',
+            'time_series_60min_singleindex.csv'
+        ];
         
-        try {
-            let answer;
+        if (validDatasets.includes(dataset)) {
+            stopStreaming();
+            selectedDataset = dataset;
+            console.log(`Switching to dataset: ${dataset}`);
             
-            // Try to get AI-generated answer
-            if (aiInsightsService && aiInsightsService.isEnabled) {
-                answer = await aiInsightsService.generateInsight(data.question);
-            } else {
-                // Fallback to predefined answer if AI is not available
-                answer = aiInsightsService 
-                    ? aiInsightsService.getFallbackAnswer(data.question)
-                    : "AI service is currently unavailable. Please try again later.";
+            try {
+                dbData = await loadCSVData(selectedDataset);
+                currentIndex = 0;
+                dataSource = 'csv';
+                io.emit('datasetChanged', { 
+                    dataset: selectedDataset, 
+                    totalRecords: dbData.length,
+                    dataSource 
+                });
+            } catch (error) {
+                console.error('Error switching dataset:', error);
+                socket.emit('error', { message: 'Failed to load dataset' });
             }
-            
-            const insight = {
-                question: data.question,
-                answer: answer
-            };
-            
-            // Send response back to the requesting client
-            socket.emit('traderInsight', insight);
-            
-        } catch (error) {
-            console.error('Error generating insight:', error);
-            socket.emit('traderInsight', {
-                question: data.question,
-                answer: "Sorry, I encountered an error processing your question. Please try again."
-            });
         }
     });
     
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
     });
+    
+    } catch (error) {
+        console.error('Error in connection handler:', error);
+    }
 });
 
 // API Routes
@@ -948,139 +918,51 @@ app.post('/api/data/refresh', async (req, res) => {
     }
 });
 
-// Get filtered data by period - Query database directly
-app.get('/api/data/period', async (req, res) => {
-    try {
-        const period = req.query.period || 'last-week';
-        
-        // Calculate cutoff date based on period
-        const now = new Date();
-        let cutoffDate;
-        
-        switch(period) {
-            case 'today':
-            case 'last-24-hours':
-                cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                break;
-            case 'yesterday':
-                // Yesterday: from start of yesterday to start of today
-                const startOfToday = new Date(now);
-                startOfToday.setHours(0, 0, 0, 0);
-                cutoffDate = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
-                break;
-            case 'last-48-hours':
-                cutoffDate = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-                break;
-            case 'last-7-days':
-            case 'last-week':
-                cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                break;
-            case 'last-30-days':
-            case 'last-month':
-                cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                break;
-            case 'last-90-days':
-                cutoffDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-                break;
-            case 'last-6-months':
-                cutoffDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
-                break;
-            case 'last-year':
-                cutoffDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-                break;
-            default:
-                cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        }
-        
-        // Determine aggregation interval based on period
-        let aggregationInterval = '15 minutes'; // default
-        let shouldAggregate = false;
-        
-        if (period === 'last-24-hours' || period === 'yesterday' || period === 'last-48-hours') {
-            // Keep raw 15-min data for short periods
-            aggregationInterval = '15 minutes';
-            shouldAggregate = false;
-        } else if (period === 'last-7-days' || period === 'last-week') {
-            // Hourly aggregation for weekly view
-            aggregationInterval = '1 hour';
-            shouldAggregate = true;
-        } else if (period === 'last-30-days' || period === 'last-month') {
-            // 4-hour aggregation for monthly view
-            aggregationInterval = '4 hours';
-            shouldAggregate = true;
-        } else if (period === 'last-90-days') {
-            // Daily aggregation for 3-month view
-            aggregationInterval = '1 day';
-            shouldAggregate = true;
-        } else if (period === 'last-6-months' || period === 'last-year') {
-            // Daily aggregation for long-term view
-            aggregationInterval = '1 day';
-            shouldAggregate = true;
-        }
-        
-        let rawData, processedData;
-        
-        if (shouldAggregate) {
-            // Use PostgreSQL time_bucket for efficient aggregation
-            const query = `
-                SELECT 
-                    time_bucket($1::interval, timestamp) AS timestamp,
-                    AVG(pl_load_actual) as pl_load_actual,
-                    AVG(pl_load_forecast) as pl_load_forecast,
-                    AVG(pl_price_day_ahead) as pl_price_day_ahead,
-                    AVG(pl_wind_onshore_generation) as pl_wind_onshore_generation,
-                    AVG(pl_wind_offshore_generation) as pl_wind_offshore_generation,
-                    AVG(pl_solar_generation) as pl_solar_generation,
-                    AVG(hu_load_actual) as hu_load_actual,
-                    AVG(hu_load_forecast) as hu_load_forecast,
-                    AVG(hu_price_day_ahead) as hu_price_day_ahead,
-                    AVG(hu_wind_onshore_generation) as hu_wind_onshore_generation,
-                    AVG(hu_wind_offshore_generation) as hu_wind_offshore_generation,
-                    AVG(hu_solar_generation) as hu_solar_generation,
-                    AVG(fi_load_actual) as fi_load_actual,
-                    AVG(fi_load_forecast) as fi_load_forecast,
-                    AVG(fi_price_day_ahead) as fi_price_day_ahead,
-                    AVG(fi_wind_onshore_generation) as fi_wind_onshore_generation,
-                    AVG(fi_wind_offshore_generation) as fi_wind_offshore_generation,
-                    AVG(fi_solar_generation) as fi_solar_generation
-                FROM energy_data
-                WHERE timestamp >= $2
-                GROUP BY time_bucket($1::interval, timestamp)
-                ORDER BY timestamp ASC
-            `;
-            
-            const result = await dbManager.pool.query(query, [aggregationInterval, cutoffDate.toISOString()]);
-            rawData = result.rows;
-        } else {
-            // Query raw data without aggregation
-            const query = `
-                SELECT * FROM energy_data
-                WHERE timestamp >= $1
-                ORDER BY timestamp ASC
-            `;
-            
-            const result = await dbManager.pool.query(query, [cutoffDate.toISOString()]);
-            rawData = result.rows;
-        }
-        
-        // Process each data point
-        processedData = rawData.map(point => processDataPoint(point));
-        
-        res.json({
-            success: true,
-            period: period,
-            dataPoints: processedData.length,
-            cutoffDate: cutoffDate.toISOString(),
-            aggregation: shouldAggregate ? aggregationInterval : 'none',
-            data: processedData
-        });
-    } catch (error) {
-        console.error('Error querying period data:', error);
-        res.status(500).json({
+// Get filtered data by period
+app.get('/api/data/period', (req, res) => {
+    const period = req.query.period || 'last-week';
+    
+    if (dbData.length === 0) {
+        return res.json({
             success: false,
-            error: error.message
+            error: 'No data available'
         });
     }
+    
+    // Calculate cutoff date based on period
+    const now = new Date();
+    let cutoffDate;
+    
+    switch(period) {
+        case 'yesterday':
+            cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            break;
+        case 'last-week':
+            cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+        case 'last-month':
+            cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            break;
+        case 'last-year':
+            cutoffDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+            break;
+        default:
+            cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    }
+    
+    // Filter data by timestamp
+    const filteredData = dbData.filter(point => {
+        const pointDate = new Date(point.timestamp);
+        return pointDate >= cutoffDate;
+    });
+    
+    res.json({
+        success: true,
+        period: period,
+        dataPoints: filteredData.length,
+        totalPoints: dbData.length,
+        data: filteredData
+    });
 });
 
 // Helper functions for analytics
@@ -1137,7 +1019,9 @@ async function startNewsFeed() {
                 console.log('Sent news:', randomNews.headline);
             }
             
-            // Note: AI insights are now on-demand only (user-triggered)
+            // Send trader insight
+            const insight = traderInsights[Math.floor(Math.random() * traderInsights.length)];
+            io.emit('traderInsight', insight);
         }
     }, 10000); // Send every 10 seconds
 }
@@ -1147,37 +1031,6 @@ function stopNewsFeed() {
         clearInterval(newsFeedInterval);
         newsFeedInterval = null;
         console.log('Stopped news feed.');
-    }
-}
-
-// Generate and emit AI-powered trader insights
-async function generateAndEmitInsight() {
-    try {
-        // Select a random question
-        const randomQuestion = traderInsights[Math.floor(Math.random() * traderInsights.length)];
-        
-        let answer;
-        
-        // Try to get AI-generated answer
-        if (aiInsightsService && aiInsightsService.isEnabled) {
-            answer = await aiInsightsService.generateInsight(randomQuestion.question);
-        } else {
-            // Fallback to predefined answers if AI is not available
-            answer = randomQuestion.answer;
-        }
-        
-        const insight = {
-            question: randomQuestion.question,
-            answer: answer
-        };
-        
-        io.emit('traderInsight', insight);
-        
-    } catch (error) {
-        console.error('Error generating trader insight:', error);
-        // Fallback to random static insight
-        const fallback = traderInsights[Math.floor(Math.random() * traderInsights.length)];
-        io.emit('traderInsight', fallback);
     }
 }
 
