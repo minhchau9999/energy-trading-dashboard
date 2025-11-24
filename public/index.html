@@ -454,6 +454,43 @@
             }
         }
 
+        /* Event filter styles */
+        #eventFilterToggle:hover {
+            background: rgba(0, 212, 255, 0.2);
+            border-color: #00d4ff;
+        }
+        
+        .event-filter-item {
+            display: flex;
+            align-items: center;
+            padding: 0.4rem 0.5rem;
+            border-radius: 4px;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        
+        .event-filter-item:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+        
+        .event-filter-checkbox {
+            margin-right: 0.5rem;
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+        }
+        
+        .event-filter-icon {
+            margin-right: 0.5rem;
+            font-size: 1rem;
+        }
+        
+        .event-filter-label {
+            color: #e0e0e0;
+            font-size: 0.85rem;
+            flex: 1;
+        }
+
         @media (max-width: 768px) {
             .dashboard {
                 grid-template-columns: 1fr;
@@ -522,6 +559,26 @@
                     <option value="FR">🇫🇷 France</option>
                     <option value="NL">🇳🇱 Netherlands</option>
                 </select>
+            </div>
+            
+            <!-- Event Filter -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; position: relative;">
+                <label style="color: #00d4ff; font-weight: 500; font-size: 0.9rem;">
+                    <i class="fas fa-filter" style="margin-right: 0.5rem;"></i>Events:
+                </label>
+                <button id="eventFilterToggle" style="min-width: 140px; padding: 0.4rem 0.8rem; background: rgba(0, 212, 255, 0.1); border: 1px solid rgba(0, 212, 255, 0.3); border-radius: 4px; color: #00d4ff; font-size: 0.85rem; cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; justify-content: space-between;">
+                    <span id="eventFilterLabel">All Events (9)</span>
+                    <i class="fas fa-chevron-down" style="font-size: 0.75rem;"></i>
+                </button>
+                <div id="eventFilterDropdown" style="display: none; position: absolute; top: 100%; left: 0; margin-top: 0.5rem; background: rgba(15, 32, 39, 0.98); border: 1px solid rgba(0, 212, 255, 0.5); border-radius: 6px; padding: 0.75rem; min-width: 280px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); z-index: 1000; backdrop-filter: blur(10px);">
+                    <div style="margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(0, 212, 255, 0.3);">
+                        <button id="selectAllEvents" style="padding: 0.3rem 0.6rem; background: rgba(0, 212, 255, 0.2); border: 1px solid rgba(0, 212, 255, 0.4); border-radius: 3px; color: #00d4ff; font-size: 0.75rem; cursor: pointer; margin-right: 0.5rem;">Select All</button>
+                        <button id="deselectAllEvents" style="padding: 0.3rem 0.6rem; background: rgba(255, 71, 87, 0.2); border: 1px solid rgba(255, 71, 87, 0.4); border-radius: 3px; color: #ff4757; font-size: 0.75rem; cursor: pointer;">Deselect All</button>
+                    </div>
+                    <div id="eventFilterOptions" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <!-- Checkboxes will be dynamically added here -->
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -843,6 +900,32 @@
         // Fetch data on-demand from API based on selected period
         // Store events globally
         let eventData = [];
+        
+        // Event filter state - all categories enabled by default
+        let eventFilters = {
+            MARKET: true,
+            NUCLEAR: true,
+            TRANSMISSION: true,
+            THERMAL: true,
+            HYDRO: true,
+            RENEWABLE: true,
+            OFFSHORE: true,
+            ENVIRONMENTAL: true,
+            GENERATION: true
+        };
+        
+        // Event category metadata
+        const eventCategories = {
+            MARKET: { icon: '💰', label: 'Market Events', color: 'rgba(156, 39, 176, 0.8)' },
+            NUCLEAR: { icon: '☢️', label: 'Nuclear Events', color: 'rgba(244, 67, 54, 0.9)' },
+            TRANSMISSION: { icon: '⚡', label: 'Transmission Events', color: 'rgba(255, 87, 34, 0.8)' },
+            THERMAL: { icon: '🔥', label: 'Thermal Events', color: 'rgba(255, 87, 34, 0.8)' },
+            HYDRO: { icon: '💧', label: 'Hydro Events', color: 'rgba(33, 150, 243, 0.8)' },
+            RENEWABLE: { icon: '🍃', label: 'Renewable Events', color: 'rgba(139, 195, 74, 0.8)' },
+            OFFSHORE: { icon: '🌊', label: 'Offshore Events', color: 'rgba(33, 150, 243, 0.8)' },
+            ENVIRONMENTAL: { icon: '🌤️', label: 'Environmental Events', color: 'rgba(76, 175, 80, 0.8)' },
+            GENERATION: { icon: '🔧', label: 'Generation Events', color: 'rgba(255, 193, 7, 0.8)' }
+        };
 
         async function fetchData() {
             try {
@@ -906,6 +989,9 @@
 
         // Initialize period info
         updatePeriodInfo();
+        
+        // Initialize event filter UI
+        initializeEventFilter();
 
         // Socket event listeners
         socket.on('connect', () => {
@@ -1005,6 +1091,100 @@
             }
         });
 
+        // Initialize event filter dropdown
+        function initializeEventFilter() {
+            const filterOptions = document.getElementById('eventFilterOptions');
+            const filterToggle = document.getElementById('eventFilterToggle');
+            const filterDropdown = document.getElementById('eventFilterDropdown');
+            
+            // Create checkboxes for each category
+            Object.keys(eventCategories).forEach(category => {
+                const meta = eventCategories[category];
+                const item = document.createElement('div');
+                item.className = 'event-filter-item';
+                item.innerHTML = `
+                    <input type="checkbox" class="event-filter-checkbox" id="filter_${category}" value="${category}" checked>
+                    <span class="event-filter-icon">${meta.icon}</span>
+                    <label class="event-filter-label" for="filter_${category}">${meta.label}</label>
+                `;
+                
+                // Handle checkbox change
+                const checkbox = item.querySelector('input');
+                checkbox.addEventListener('change', (e) => {
+                    eventFilters[category] = e.target.checked;
+                    updateEventFilterLabel();
+                    updateCharts();
+                });
+                
+                // Click on item toggles checkbox
+                item.addEventListener('click', (e) => {
+                    if (e.target !== checkbox) {
+                        checkbox.checked = !checkbox.checked;
+                        eventFilters[category] = checkbox.checked;
+                        updateEventFilterLabel();
+                        updateCharts();
+                    }
+                });
+                
+                filterOptions.appendChild(item);
+            });
+            
+            // Toggle dropdown
+            filterToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = filterDropdown.style.display === 'block';
+                filterDropdown.style.display = isVisible ? 'none' : 'block';
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!filterToggle.contains(e.target) && !filterDropdown.contains(e.target)) {
+                    filterDropdown.style.display = 'none';
+                }
+            });
+            
+            // Select all button
+            document.getElementById('selectAllEvents').addEventListener('click', (e) => {
+                e.stopPropagation();
+                Object.keys(eventFilters).forEach(category => {
+                    eventFilters[category] = true;
+                    const checkbox = document.getElementById(`filter_${category}`);
+                    if (checkbox) checkbox.checked = true;
+                });
+                updateEventFilterLabel();
+                updateCharts();
+            });
+            
+            // Deselect all button
+            document.getElementById('deselectAllEvents').addEventListener('click', (e) => {
+                e.stopPropagation();
+                Object.keys(eventFilters).forEach(category => {
+                    eventFilters[category] = false;
+                    const checkbox = document.getElementById(`filter_${category}`);
+                    if (checkbox) checkbox.checked = false;
+                });
+                updateEventFilterLabel();
+                updateCharts();
+            });
+            
+            updateEventFilterLabel();
+        }
+        
+        // Update the filter button label
+        function updateEventFilterLabel() {
+            const selectedCount = Object.values(eventFilters).filter(v => v).length;
+            const totalCount = Object.keys(eventFilters).length;
+            const label = document.getElementById('eventFilterLabel');
+            
+            if (selectedCount === 0) {
+                label.textContent = 'No Events';
+            } else if (selectedCount === totalCount) {
+                label.textContent = `All Events (${totalCount})`;
+            } else {
+                label.textContent = `${selectedCount} of ${totalCount} Events`;
+            }
+        }
+        
         function updateCharts() {
             if (dataHistory.length === 0) return;
 
@@ -1081,8 +1261,11 @@
                 return;
             }
 
-            // Filter events for the selected country
-            const countryEvents = eventData.filter(e => e.country === country);
+            // Filter events for the selected country and enabled categories
+            const countryEvents = eventData.filter(e => {
+                const category = e.event_category || 'GENERATION';
+                return e.country === country && eventFilters[category];
+            });
             
             if (countryEvents.length === 0) {
                 if (chart.options.plugins && chart.options.plugins.annotation) {
