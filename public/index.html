@@ -640,7 +640,12 @@
         </div>
 
         <div class="card compact-card trader-qa clickable" data-gadget="ai">
-            <h3><i class="fas fa-lightbulb"></i> AI Trading Advisor</h3>
+            <h3>
+                <i class="fas fa-lightbulb"></i> AI Trading Advisor
+                <span id="conversationIndicator" style="font-size: 0.7rem; color: #00d4ff; opacity: 0; margin-left: 0.5rem;">
+                    💬 <span id="conversationCount">0</span>
+                </span>
+            </h3>
             
             <!-- Question Input with Datalist for suggestions -->
             <div style="margin-bottom: 0.75rem;">
@@ -652,33 +657,50 @@
                     style="width: 100%; padding: 0.5rem; background: rgba(0, 212, 255, 0.1); border: 1px solid rgba(0, 212, 255, 0.3); border-radius: 4px; color: #e0e0e0; font-size: 0.85rem;"
                 />
                 <datalist id="predefinedQuestions">
+                    <!-- Market Analysis -->
                     <option value="What's driving price volatility in the Polish market today?"></option>
                     <option value="Is there an arbitrage opportunity between Poland and Finland?"></option>
-                    <option value="How accurate are the wind forecasts for Finland this week?"></option>
                     <option value="Should we adjust our position based on Hungarian load forecast deviation?"></option>
                     <option value="What's the renewable energy outlook for Poland?"></option>
-                    <option value="How is the Polish coal fleet responding to demand spikes?"></option>
-                    <option value="What's the biggest risk in the Nordic market right now?"></option>
-                    <option value="Are Hungarian day-ahead prices following the regional trend?"></option>
-                    <option value="What's the cross-border flow pattern between PL and neighboring markets?"></option>
                     <option value="How should we position for the weekend load drop?"></option>
-                    <option value="Is the Finnish market pricing in the forecasted temperature drop?"></option>
-                    <option value="What's the impact of EU carbon prices on Central European markets?"></option>
-                    <option value="Should we be concerned about grid congestion in Hungary?"></option>
-                    <option value="What's the solar capacity factor looking like for Poland this month?"></option>
-                    <option value="How reliable is the load forecast during holiday periods?"></option>
+                    <option value="What's the biggest risk in the Nordic market right now?"></option>
+                    
+                    <!-- Weather & Forecasts (triggers online weather API) -->
+                    <option value="What's the weather forecast for Poland this week?"></option>
+                    <option value="How will temperature changes affect demand in Finland?"></option>
+                    <option value="What wind speeds are expected in Poland?"></option>
+                    
+                    <!-- News & Events (triggers news search) -->
+                    <option value="What's the latest news about European energy markets?"></option>
+                    <option value="Are there any recent developments in renewable energy?"></option>
+                    <option value="What are the latest electricity price trends in the news?"></option>
+                    
+                    <!-- General Knowledge (triggers web search) -->
+                    <option value="What is demand response in electricity markets?"></option>
+                    <option value="Explain the Nord Pool market structure"></option>
                 </datalist>
             </div>
             
-            <!-- Ask Button -->
-            <button 
-                id="askButton" 
-                class="btn btn-primary" 
-                onclick="askAIInsight()"
-                style="width: 100%; margin-bottom: 0.75rem; padding: 0.5rem; font-size: 0.85rem;"
-            >
-                <i class="fas fa-robot"></i> Ask AI
-            </button>
+            <!-- Ask and Reset Buttons -->
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
+                <button 
+                    id="askButton" 
+                    class="btn btn-primary" 
+                    onclick="askAIInsight()"
+                    style="flex: 1; padding: 0.5rem; font-size: 0.85rem;"
+                >
+                    <i class="fas fa-robot"></i> Ask AI
+                </button>
+                <button 
+                    id="resetButton" 
+                    class="btn btn-secondary" 
+                    onclick="resetConversation()"
+                    style="padding: 0.5rem 0.75rem; font-size: 0.85rem; opacity: 0; pointer-events: none;"
+                    title="Reset conversation"
+                >
+                    <i class="fas fa-redo"></i>
+                </button>
+            </div>
             
             <!-- Loading Indicator -->
             <div id="loadingIndicator" style="display: none; text-align: center; margin-bottom: 0.75rem; color: #00d4ff; font-size: 0.85rem;">
@@ -686,9 +708,9 @@
             </div>
             
             <!-- Answer Section -->
-            <div id="qaSection" style="background: rgba(0, 212, 255, 0.05); padding: 0.75rem; border-radius: 4px; border: 1px solid rgba(0, 212, 255, 0.2);">
+            <div id="qaSection" style="background: rgba(0, 212, 255, 0.05); padding: 0.75rem; border-radius: 4px; border: 1px solid rgba(0, 212, 255, 0.2); max-height: 200px; overflow-y: auto;">
                 <p class="question" id="displayQuestion" style="margin-bottom: 0.5rem;">Ask a question to get AI-powered trading insights!</p>
-                <p class="answer" id="displayAnswer">Select a question from the dropdown or type your own, then click "Ask AI".</p>
+                <p class="answer" id="displayAnswer">Select a question from the dropdown or type your own, then click "Ask AI". You can ask follow-up questions to continue the discussion.</p>
             </div>
         </div>
     </div>
@@ -1054,9 +1076,24 @@
             document.getElementById('displayQuestion').textContent = insight.question;
             document.getElementById('displayAnswer').textContent = insight.answer;
             
+            // Update conversation indicator
+            if (insight.conversationLength && insight.conversationLength > 0) {
+                const indicator = document.getElementById('conversationIndicator');
+                const count = document.getElementById('conversationCount');
+                const resetButton = document.getElementById('resetButton');
+                
+                count.textContent = insight.conversationLength;
+                indicator.style.opacity = '1';
+                resetButton.style.opacity = '1';
+                resetButton.style.pointerEvents = 'auto';
+            }
+            
             // Hide loading indicator
             document.getElementById('loadingIndicator').style.display = 'none';
             document.getElementById('askButton').disabled = false;
+            
+            // Clear input for next question
+            document.getElementById('questionInput').value = '';
         });
 
         // Function to ask AI for insights on demand
@@ -1078,6 +1115,28 @@
             // Emit the question to the server
             socket.emit('askInsight', { question: question });
         }
+        
+        // Function to reset conversation
+        function resetConversation() {
+            if (confirm('Reset the conversation? This will clear all history and start fresh.')) {
+                socket.emit('resetConversation');
+                
+                // Reset UI
+                document.getElementById('conversationIndicator').style.opacity = '0';
+                document.getElementById('resetButton').style.opacity = '0';
+                document.getElementById('resetButton').style.pointerEvents = 'none';
+                document.getElementById('displayQuestion').textContent = 'Ask a question to get AI-powered trading insights!';
+                document.getElementById('displayAnswer').textContent = 'Select a question from the dropdown or type your own, then click "Ask AI". You can ask follow-up questions to continue the discussion.';
+                document.getElementById('questionInput').value = '';
+            }
+        }
+        
+        // Listen for conversation reset confirmation
+        socket.on('conversationReset', (data) => {
+            if (data.success) {
+                console.log('✅ Conversation reset successfully');
+            }
+        });
         
         // Allow pressing Enter in the input to submit
         document.addEventListener('DOMContentLoaded', () => {
@@ -1241,10 +1300,10 @@
             addEventAnnotations(priceChart, selectedCountry);
             addEventAnnotations(renewableChart, selectedCountry);
 
-            // Update all charts
-            loadChart.update('none');
-            priceChart.update('none');
-            renewableChart.update('none');
+            // Update all charts with animation for better visual feedback
+            loadChart.update('active');
+            priceChart.update('active');
+            renewableChart.update('active');
         }
 
         // Function to add event annotations to charts

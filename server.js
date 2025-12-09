@@ -8,6 +8,23 @@ const fs = require('fs');
 const { parse } = require('csv-parse');
 const Parser = require('rss-parser');
 const { subDays, format } = require('date-fns');
+
+// AI Advisor Logger
+const aiLogStream = fs.createWriteStream(path.join(__dirname, 'ai-advisor.log'), { flags: 'a' });
+const aiLogger = {
+    log: (message) => {
+        const timestamp = new Date().toISOString();
+        const logLine = `[${timestamp}] ${message}\n`;
+        aiLogStream.write(logLine);
+        console.log(message); // Also log to console
+    },
+    error: (message, error) => {
+        const timestamp = new Date().toISOString();
+        const logLine = `[${timestamp}] ERROR: ${message}\n${error ? error.stack : ''}\n`;
+        aiLogStream.write(logLine);
+        console.error(message, error); // Also log to console
+    }
+};
 const EnergyDataProcessor = require('./utils/dataProcessor');
 const TradingMetrics = require('./utils/tradingMetrics');
 const DatabaseManager = require('./utils/databaseManager');
@@ -59,6 +76,9 @@ const entsoeClient = ENTSOE_API_KEY && ENTSOE_API_KEY !== 'YOUR_API_KEY_HERE'
 
 // Initialize AI Insights Service
 let aiInsightsService = null;
+
+// Store conversation histories per socket connection
+const conversationHistories = new Map();
 
 // Initialize ENTSO-E live data manager
 const entsoeDataManager = ENTSOE_API_KEY && ENTSOE_API_KEY !== 'YOUR_API_KEY_HERE'
@@ -516,10 +536,11 @@ async function initializeData() {
             // Initialize AI Insights Service
             if (!aiInsightsService) {
                 console.log('🤖 Initializing AI Insights Service...');
-                aiInsightsService = new AIInsightsService(dbManager);
+                aiInsightsService = new AIInsightsService(dbManager, aiLogger);
                 await aiInsightsService.buildMarketContext();
                 const status = aiInsightsService.getStatus();
                 console.log(`✅ AI Insights Service ready (Model: ${status.model}, Enabled: ${status.enabled})`);
+                aiLogger.log(`🚀 AI Insights Service initialized (Model: ${status.model}, Enabled: ${status.enabled})`);
             }
             
             // Fetch events from ENTSO-E
@@ -1003,40 +1024,107 @@ io.on('connection', (socket) => {
     
     // Handle AI insight requests
     socket.on('askInsight', async (data) => {
-        console.log(`📝 AI Insight requested: "${data.question}"`);
+        const requestTime = new Date().toISOString();
+        aiLogger.log(`\n${'='.repeat(80)}`);
+        aiLogger.log(`📝 AI ADVISOR REQUEST [${requestTime}]`);
+        aiLogger.log(`   Client: ${socket.id}`);
+        aiLogger.log(`   Question: "${data.question}"`);
+        
+        // Initialize conversation history for this socket if it doesn't exist
+        if (!conversationHistories.has(socket.id)) {
+            conversationHistories.set(socket.id, []);
+            aiLogger.log(`   🆕 New conversation started`);
+        }
+        
+        const conversationHistory = conversationHistories.get(socket.id);
+        aiLogger.log(`   💬 Conversation history: ${conversationHistory.length} previous exchanges`);
+        aiLogger.log(`   AI Service Status: ${aiInsightsService ? (aiInsightsService.isEnabled ? '✅ Enabled' : '⚠️  Disabled') : '❌ Not initialized'}`);
+        
+        const startTime = Date.now();
         
         try {
             let answer;
+            let source = 'unknown';
             
-            // Try to get AI-generated answer
+            // Try to get AI-generated answer with conversation history
             if (aiInsightsService && aiInsightsService.isEnabled) {
-                answer = await aiInsightsService.generateInsight(data.question);
+                aiLogger.log(`   Processing: Using AI service (Model: ${aiInsightsService.model})`);
+                answer = await aiInsightsService.generateInsightWithHistory(
+                    data.question, 
+                    conversationHistory
+                );
+                source = 'AI-Generated';
             } else {
+                aiLogger.log(`   Processing: Using fallback answers (AI unavailable)`);
                 // Fallback to predefined answer if AI is not available
                 answer = aiInsightsService 
                     ? aiInsightsService.getFallbackAnswer(data.question)
                     : "AI service is currently unavailable. Please try again later.";
+                source = 'Fallback';
+            }
+            
+            const duration = Date.now() - startTime;
+            
+            // Add to conversation history
+            conversationHistory.push({
+                question: data.question,
+                answer: answer,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Keep only last 10 exchanges to prevent context overflow
+            if (conversationHistory.length > 10) {
+                conversationHistory.shift();
+                aiLogger.log(`   🗑️  Trimmed old conversation history`);
             }
             
             const insight = {
                 question: data.question,
-                answer: answer
+                answer: answer,
+                conversationLength: conversationHistory.length
             };
+            
+            aiLogger.log(`   ✅ Response generated in ${duration}ms`);
+            aiLogger.log(`   Source: ${source}`);
+            aiLogger.log(`   Answer length: ${answer.length} characters`);
+            aiLogger.log(`   Answer preview: "${answer.substring(0, 100)}${answer.length > 100 ? '...' : ''}"`);
+            aiLogger.log(`   💾 Conversation history updated: ${conversationHistory.length} exchanges`);
             
             // Send response back to the requesting client
             socket.emit('traderInsight', insight);
+            aiLogger.log(`   📤 Response sent to client`);
+            aiLogger.log(`${'='.repeat(80)}\n`);
             
         } catch (error) {
-            console.error('Error generating insight:', error);
+            const duration = Date.now() - startTime;
+            aiLogger.error(`   ❌ Error after ${duration}ms: ${error.message}`, error);
             socket.emit('traderInsight', {
                 question: data.question,
                 answer: "Sorry, I encountered an error processing your question. Please try again."
             });
+            aiLogger.log(`   📤 Error response sent to client`);
+            aiLogger.log(`${'='.repeat(80)}\n`);
+        }
+    });
+    
+    // Handle conversation reset
+    socket.on('resetConversation', () => {
+        if (conversationHistories.has(socket.id)) {
+            const historyLength = conversationHistories.get(socket.id).length;
+            conversationHistories.delete(socket.id);
+            aiLogger.log(`🔄 Conversation reset for client ${socket.id} (cleared ${historyLength} exchanges)`);
+            socket.emit('conversationReset', { success: true });
         }
     });
     
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
+        // Clean up conversation history
+        if (conversationHistories.has(socket.id)) {
+            const historyLength = conversationHistories.get(socket.id).length;
+            conversationHistories.delete(socket.id);
+            aiLogger.log(`🧹 Client ${socket.id} disconnected - cleaned up conversation history (${historyLength} exchanges)`);
+        }
     });
 });
 

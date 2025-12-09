@@ -1,8 +1,12 @@
 const { Ollama } = require('ollama');
+const { MemoryVectorStore } = require("@langchain/core/vectorstores");
+const { OllamaEmbeddings } = require("@langchain/ollama");
+const WebTools = require('./webTools');
 
 class AIInsightsService {
-    constructor(databaseManager) {
+    constructor(databaseManager, logger = console) {
         this.db = databaseManager;
+        this.logger = logger; // Use custom logger or default to console
         this.cache = new Map();
         this.cacheTTL = parseInt(process.env.AI_INSIGHTS_CACHE_TTL) || 300000; // 5 minutes
         this.isEnabled = process.env.AI_INSIGHTS_ENABLED === 'true';
@@ -14,8 +18,21 @@ class AIInsightsService {
         // Initialize Ollama client
         this.ollama = new Ollama({ host: this.ollamaHost });
         
+        // Initialize Web Tools for online information access
+        this.webTools = new WebTools();
+        this.webToolsEnabled = process.env.WEB_TOOLS_ENABLED !== 'false'; // Enabled by default
+        
+        // RAG: Initialize embedding model and vector store
+        this.embeddings = new OllamaEmbeddings({
+            model: "nomic-embed-text",
+            baseUrl: this.ollamaHost,
+        });
+        this.vectorStore = null;
+        this.vectorStoreInitialized = false;
+        
         if (this.isEnabled) {
             this.testOllama();
+            this.initializeVectorStore();
         }
     }
 
@@ -32,6 +49,85 @@ class AIInsightsService {
             console.error('❌ Failed to connect to Ollama:', error.message);
             console.log('   Insights will use fallback answers');
             this.isEnabled = false;
+        }
+    }
+
+    // RAG: Initialize vector store with event data
+    async initializeVectorStore() {
+        try {
+            console.log('🔧 Initializing RAG vector store for events...');
+            
+            // Fetch all events from database
+            const query = `
+                SELECT id, title, description, category, event_type, affected_capacity
+                FROM energy_events
+                ORDER BY event_time DESC
+                LIMIT 1000
+            `;
+            
+            const result = await this.db.pool.query(query);
+            const events = result.rows;
+
+            if (events.length === 0) {
+                console.log('⚠️  No events found in database. Vector store will be empty.');
+                return;
+            }
+
+            // Prepare documents for vector store
+            const documents = events.map(event => {
+                const capacityInfo = event.affected_capacity 
+                    ? ` Affected capacity: ${event.affected_capacity}MW.` 
+                    : '';
+                
+                return {
+                    pageContent: `[${event.category}] ${event.title}. ${event.description}${capacityInfo}`,
+                    metadata: {
+                        id: event.id,
+                        category: event.category,
+                        eventType: event.event_type,
+                        affectedCapacity: event.affected_capacity
+                    }
+                };
+            });
+
+            // Create vector store from documents
+            this.vectorStore = await MemoryVectorStore.fromDocuments(
+                documents,
+                this.embeddings
+            );
+
+            this.vectorStoreInitialized = true;
+            console.log(`✅ RAG vector store initialized with ${events.length} events`);
+            
+        } catch (error) {
+            console.error('❌ Error initializing vector store:', error.message);
+            this.vectorStoreInitialized = false;
+        }
+    }
+
+    // RAG: Search for relevant events based on user question
+    async findRelevantEvents(question, topK = 4) {
+        if (!this.vectorStoreInitialized || !this.vectorStore) {
+            console.log('⚠️  Vector store not initialized, returning empty results');
+            return [];
+        }
+
+        try {
+            // Perform semantic similarity search
+            const results = await this.vectorStore.similaritySearch(question, topK);
+            
+            console.log(`🔍 Found ${results.length} relevant events for question`);
+            
+            // Format results for context
+            return results.map((result, index) => ({
+                content: result.pageContent,
+                category: result.metadata.category,
+                relevanceRank: index + 1
+            }));
+            
+        } catch (error) {
+            console.error('❌ Error searching vector store:', error.message);
+            return [];
         }
     }
 
@@ -172,8 +268,84 @@ class AIInsightsService {
         return names[code] || code;
     }
 
-    // Generate AI-powered insight
-    async generateInsight(question) {
+    /**
+     * Detect if question requires online information and fetch it
+     */
+    async fetchOnlineContext(question) {
+        if (!this.webToolsEnabled) {
+            return '';
+        }
+
+        const questionLower = question.toLowerCase();
+        let onlineContext = '';
+
+        try {
+            // Weather-related queries
+            if (questionLower.includes('weather') || questionLower.includes('temperature') || 
+                questionLower.includes('forecast') || questionLower.includes('wind speed')) {
+                
+                this.logger.log(`   🌤️  Fetching weather forecast...`);
+                
+                // Extract country if mentioned
+                let country = 'PL';
+                if (questionLower.includes('poland') || questionLower.includes('polish')) country = 'PL';
+                else if (questionLower.includes('hungary') || questionLower.includes('hungarian')) country = 'HU';
+                else if (questionLower.includes('finland') || questionLower.includes('finnish')) country = 'FI';
+                else if (questionLower.includes('france') || questionLower.includes('french')) country = 'FR';
+                else if (questionLower.includes('netherlands') || questionLower.includes('dutch')) country = 'NL';
+
+                const weather = await this.webTools.getWeatherForecast(country, 3);
+                const weatherText = this.webTools.formatForAI('weather', weather);
+                onlineContext += `\n\n${weatherText}`;
+                this.logger.log(`   ✅ Weather data retrieved`);
+            }
+
+            // News-related queries
+            if (questionLower.includes('news') || questionLower.includes('latest') || 
+                questionLower.includes('recent') || questionLower.includes('today')) {
+                
+                this.logger.log(`   📰 Fetching recent energy news...`);
+                
+                // Customize search query based on question context
+                let searchQuery = 'energy market europe';
+                if (questionLower.includes('poland')) searchQuery = 'poland energy market';
+                else if (questionLower.includes('hungary')) searchQuery = 'hungary energy market';
+                else if (questionLower.includes('finland')) searchQuery = 'finland energy market';
+                else if (questionLower.includes('price')) searchQuery = 'electricity prices europe';
+                else if (questionLower.includes('renewable')) searchQuery = 'renewable energy europe';
+
+                const news = await this.webTools.searchNews(searchQuery, 3);
+                const newsText = this.webTools.formatForAI('news', news);
+                onlineContext += `\n\n${newsText}`;
+                this.logger.log(`   ✅ News data retrieved (${news.length} articles)`);
+            }
+
+            // General web search for specific topics
+            if (questionLower.includes('what is') || questionLower.includes('who is') || 
+                questionLower.includes('define') || questionLower.includes('explain')) {
+                
+                // Extract the search term
+                const searchMatch = questionLower.match(/(?:what is|who is|define|explain)\s+(.+?)(?:\?|$)/);
+                if (searchMatch && searchMatch[1]) {
+                    const searchTerm = searchMatch[1].trim();
+                    this.logger.log(`   🔍 Web search for: "${searchTerm}"`);
+                    
+                    const searchResults = await this.webTools.webSearch(searchTerm);
+                    const searchText = this.webTools.formatForAI('search', searchResults);
+                    onlineContext += `\n\n${searchText}`;
+                    this.logger.log(`   ✅ Web search completed`);
+                }
+            }
+
+        } catch (error) {
+            this.logger.error(`   ❌ Error fetching online context: ${error.message}`, error);
+        }
+
+        return onlineContext;
+    }
+
+    // Generate AI-powered insight with conversation history for multi-turn discussions
+    async generateInsightWithHistory(question, conversationHistory = []) {
         if (!this.isEnabled) {
             return this.getFallbackAnswer(question);
         }
@@ -181,54 +353,107 @@ class AIInsightsService {
         const startTime = Date.now();
 
         try {
-            // Check cache
-            const cacheKey = question.toLowerCase();
-            const cached = this.cache.get(cacheKey);
-            if (cached && (Date.now() - cached.timestamp) < this.cacheTTL) {
-                console.log(`📦 Cache hit for: "${question.substring(0, 50)}..."`);
-                return cached.answer;
-            }
+            // Skip cache for conversation context - each exchange should be unique
+            this.logger.log(`   💭 Generating response with conversation context (${conversationHistory.length} previous exchanges)`);
 
             // Update context if stale (older than 5 minutes)
             if (!this.marketContext || !this.lastContextUpdate || 
                 (Date.now() - this.lastContextUpdate) > 300000) {
-                console.log('🔄 Updating market context...');
+                this.logger.log('   🔄 Updating market context...');
                 await this.buildMarketContext();
             }
 
-            // Build prompt
-            const prompt = `You are an expert energy trading analyst. Based on the current market data, answer the following question concisely and actionably.
+            // RAG: Find relevant events based on the question
+            this.logger.log(`   🔍 Searching vector store for relevant events...`);
+            const relevantEvents = await this.findRelevantEvents(question, 4);
+            this.logger.log(`   📊 Found ${relevantEvents.length} relevant events from vector store`);
+            if (relevantEvents.length > 0) {
+                relevantEvents.forEach((event, i) => {
+                    this.logger.log(`      ${i+1}. ${event.content.substring(0, 80)}...`);
+                });
+            }
+            
+            // Fetch online context (weather, news, web search)
+            this.logger.log(`   🌐 Checking for online information needs...`);
+            const onlineContext = await this.fetchOnlineContext(question);
+            if (onlineContext) {
+                this.logger.log(`   ✅ Online context added to prompt`);
+            }
+            
+            // Build enhanced context with relevant events
+            let eventsContext = '';
+            if (relevantEvents.length > 0) {
+                eventsContext = '\n\nRELEVANT RECENT EVENTS:\n';
+                relevantEvents.forEach((event, index) => {
+                    eventsContext += `${index + 1}. ${event.content}\n`;
+                });
+            }
 
-${this.marketContext || 'Market data unavailable.'}
+            // Build conversation history context
+            let conversationContext = '';
+            if (conversationHistory.length > 0) {
+                conversationContext = '\n\nPREVIOUS CONVERSATION:\n';
+                conversationHistory.slice(-5).forEach((exchange, index) => {
+                    conversationContext += `Q${index + 1}: ${exchange.question}\n`;
+                    conversationContext += `A${index + 1}: ${exchange.answer}\n\n`;
+                });
+            }
 
-Question: ${question}
+            // Build messages array for chat API (proper conversation format)
+            const systemPrompt = `You are an expert energy trading analyst with access to real-time market data, historical events, and online information sources (weather forecasts, news, web search). Provide concise, data-driven answers that reference specific numbers and events when relevant. When answering follow-up questions, maintain context from the previous conversation and build upon earlier answers. Be conversational but professional.`;
+            
+            const messages = [
+                {
+                    role: 'system',
+                    content: systemPrompt
+                }
+            ];
 
-Provide a brief, data-driven answer (2-3 sentences max). Include specific numbers from the data when relevant. Focus on actionable insights for traders.
+            // Add conversation history as messages
+            conversationHistory.slice(-5).forEach(exchange => {
+                messages.push({ role: 'user', content: exchange.question });
+                messages.push({ role: 'assistant', content: exchange.answer });
+            });
 
-Answer:`;
+            // Add current context and question
+            const currentPrompt = `CURRENT MARKET DATA:
+${this.marketContext || 'Market data unavailable.'}${eventsContext}${onlineContext}
 
+Current Question: ${question}
 
-            // Call Ollama using chat API
-            console.log(`🤖 Generating AI insight for: "${question.substring(0, 50)}..."`);
+Provide a clear, actionable answer (2-4 sentences). Reference previous discussion if relevant. Use specific data points.`;
+
+            messages.push({ role: 'user', content: currentPrompt });
+
+            // Call Ollama using chat API with conversation history
+            this.logger.log(`   🤖 Calling Ollama model: ${this.model}`);
+            this.logger.log(`   📝 Message count: ${messages.length} (including ${conversationHistory.length} history exchanges)`);
+            this.logger.log(`   ⏳ Waiting for AI response...`);
+            
+            const aiStartTime = Date.now();
             const response = await this.ollama.chat({
                 model: this.model,
-                messages: [
-                    { role: 'user', content: prompt }
-                ]
+                messages: messages,
+                options: {
+                    temperature: 0.7,  // Slightly more creative for conversational flow
+                    num_predict: 200   // Allow longer responses for follow-ups
+                }
             });
+            const aiDuration = Date.now() - aiStartTime;
             const answer = response.message.content.trim();
             const duration = Date.now() - startTime;
 
-            console.log(`✅ AI response generated in ${duration}ms`);
-
-            // Cache the result
-            this.cache.set(cacheKey, {
-                answer: answer,
-                timestamp: Date.now()
-            });
-
-            // Clean old cache entries
-            this.cleanCache();
+            this.logger.log(`   ✅ AI model responded in ${aiDuration}ms`);
+            this.logger.log(`   📊 Total processing time: ${duration}ms`);
+            
+            const contextSources = [];
+            contextSources.push(`${relevantEvents.length} events`);
+            contextSources.push('market data');
+            if (conversationHistory.length > 0) contextSources.push(`${conversationHistory.length} history`);
+            if (onlineContext) contextSources.push('online sources');
+            
+            this.logger.log(`   🎯 Context used: ${contextSources.join(' + ')}`);
+            this.logger.log(`   💬 Response: "${answer.substring(0, 150)}${answer.length > 150 ? '...' : ''}"`);
 
             return answer;
 
@@ -236,6 +461,12 @@ Answer:`;
             console.error('❌ Error generating AI insight:', error.message);
             return this.getFallbackAnswer(question);
         }
+    }
+
+    // Generate AI-powered insight with RAG (single question, no history)
+    async generateInsight(question) {
+        // Delegate to the history-aware version with empty history
+        return this.generateInsightWithHistory(question, []);
     }
 
     // Fallback to mock answers if AI fails
@@ -277,10 +508,13 @@ Answer:`;
         return {
             enabled: this.isEnabled,
             model: process.env.OLLAMA_MODEL || 'llama3:8b',
+            embeddingModel: 'nomic-embed-text',
             cacheSize: this.cache.size,
             lastContextUpdate: this.lastContextUpdate,
             contextAge: this.lastContextUpdate ? 
-                Math.round((Date.now() - this.lastContextUpdate) / 1000) : null
+                Math.round((Date.now() - this.lastContextUpdate) / 1000) : null,
+            ragEnabled: this.vectorStoreInitialized,
+            vectorStoreReady: this.vectorStore !== null
         };
     }
 }

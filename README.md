@@ -106,10 +106,29 @@ Real-time energy trading analytics dashboard for European electricity markets. V
 - No data sent to external APIs
 - Instant responses without internet dependency
 
+**Multi-Turn Conversations**
+- Ask follow-up questions to continue the discussion
+- AI maintains conversation context (up to 10 exchanges)
+- Each question builds upon previous answers
+- Reset button to start fresh conversation
+
 **Interactive Q&A**
 - Type custom questions or select from 15 predefined trading queries
 - Questions analyze current market conditions and data
 - Responses provide actionable trading insights and risk assessment
+
+**RAG (Retrieval-Augmented Generation)**
+- Vector store searches relevant market events for each question
+- Combines real-time market data with historical event context
+- Semantic search using nomic-embed-text embeddings
+- Accurate, data-driven responses based on actual market conditions
+
+**Online Information Access**
+- 🌤️ **Weather Forecasts**: Automatically fetches weather data when asked about temperature, wind, or forecasts
+- 📰 **Energy News**: Searches recent energy market news from RSS feeds and news APIs
+- 🔍 **Web Search**: Can look up definitions, concepts, and general information via DuckDuckGo
+- 🌍 **Country-Specific Data**: Provides weather and news tailored to Poland, Hungary, Finland, France, and Netherlands
+- ⚡ **Smart Detection**: Automatically determines when online information is needed based on question context
 
 **Predefined Questions Include:**
 - What's driving price volatility in the Polish market today?
@@ -121,8 +140,16 @@ Real-time energy trading analytics dashboard for European electricity markets. V
 **Enhanced Response Display**
 - Loading indicator while AI processes query
 - Formatted question and answer sections
+- Conversation counter showing number of exchanges
 - Expandable modal view for longer responses
 - Press Enter in input field to submit questions
+
+**Dedicated Logging**
+- All AI Advisor interactions logged to `ai-advisor.log`
+- Detailed logging of questions, responses, and processing times
+- RAG search results and vector store operations
+- Conversation history tracking and management
+- Separate from main server logs for easy analysis
 
 ###  **TimescaleDB Integration**
 
